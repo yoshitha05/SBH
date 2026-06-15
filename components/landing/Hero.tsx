@@ -51,29 +51,24 @@ export default function Hero() {
         and tenant insights.
       </p>
 
-      <div className="flex gap-4 mt-10">
+      <div className="flex items-center gap-4 mt-10">
+        <Link
+          href="/admin"
+          className="bg-sky-500 text-white px-6 py-3 rounded-xl font-semibold"
+        >
+          Admin
+        </Link>
+
         <Link
           href="/owner"
-          className="
-          bg-sky-500
-          px-6
-          py-3
-          rounded-xl
-          font-semibold
-        "
+          className="bg-sky-500 px-6 py-3 rounded-xl font-semibold"
         >
           Start as Owner
         </Link>
 
         <Link
           href="/tenant"
-          className="
-          border
-          border-slate-700
-          px-6
-          py-3
-          rounded-xl
-        "
+          className="border border-slate-700 px-6 py-3 rounded-xl"
         >
           Tenant Login
         </Link>

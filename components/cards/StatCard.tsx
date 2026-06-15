@@ -1,4 +1,7 @@
+"use client";
+
 import { ReactNode } from "react";
+import CountUp from "react-countup";
 
 type Props = {
   title: string;
@@ -11,6 +14,12 @@ export default function StatCard({
   value,
   icon,
 }: Props) {
+  const number = Number(
+    value.replace(/[₹,%]/g, "")
+  );
+
+  const hasPercent = value.includes("%");
+
   return (
     <div
       className="
@@ -18,11 +27,12 @@ export default function StatCard({
       backdrop-blur-xl
       border
       border-slate-800
-      rounded-2xl
+      rounded-3xl
       p-6
+      shadow-[0_0_30px_rgba(56,189,248,0.1)]
       "
     >
-      <div className="flex justify-between">
+      <div className="flex justify-between items-start">
         <div>
           <p className="text-slate-400">
             {title}
@@ -33,9 +43,18 @@ export default function StatCard({
             text-3xl
             font-bold
             mt-2
-          "
+            "
           >
-            {value}
+            {hasPercent ? (
+              <>
+                <CountUp end={number} duration={2} />%
+              </>
+            ) : (
+              <>
+                ₹
+                <CountUp end={number} duration={2} />
+              </>
+            )}
           </h2>
         </div>
 

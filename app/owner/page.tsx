@@ -5,6 +5,10 @@ import ForecastChart from "@/components/charts/ForecastChart";
 import AIRecommendations from "@/components/dashboard/AIRecommendations";
 import CollectionChart from "@/components/charts/CollectionChart";
 import AIInsight from "@/components/dashboard/AIInsight";
+import TopBar from "@/components/dashboard/TopBar";
+import TenantAvatars from "@/components/dashboard/TenantAvatars";
+import ActivityFeed from "@/components/dashboard/ActivityFeed";
+import FloatingAI from "@/components/dashboard/FloatingAI";
 
 import {
   Wallet,
@@ -18,9 +22,7 @@ export default function OwnerDashboard() {
       <Sidebar />
 
       <main className="flex-1 p-8">
-        <h1 className="text-4xl font-black mb-10">
-          Portfolio Intelligence
-        </h1>
+        <TopBar />
 
         {/* KPI CARDS */}
         <div className="grid md:grid-cols-3 gap-6">
@@ -57,9 +59,23 @@ export default function OwnerDashboard() {
 
         {/* RECOMMENDATIONS */}
         <div className="mt-8">
-          <AIRecommendations />
+            <AIRecommendations />
         </div>
-      </main>
-    </div>
+
+        <div
+            className="
+            grid
+            lg:grid-cols-2
+            gap-6
+            mt-8
+            "
+        >
+            <TenantAvatars />
+            <ActivityFeed />
+        </div>
+
+        <FloatingAI />
+            </main>
+            </div>
   );
 }
