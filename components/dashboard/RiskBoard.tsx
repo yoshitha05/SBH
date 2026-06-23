@@ -18,7 +18,7 @@ export default function RiskBoard() {
         mb-6
       "
       >
-        Tenant Risk Board
+        Tenant alerts
       </h2>
 
       <div className="space-y-5">

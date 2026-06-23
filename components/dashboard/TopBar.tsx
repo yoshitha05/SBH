@@ -15,11 +15,11 @@ export default function TopBar() {
     >
       <div>
         <h1 className="text-4xl font-black">
-          Portfolio Intelligence
+          Dashboard
         </h1>
 
         <p className="text-slate-400 mt-1">
-          AI-powered rent management
+          rent management
         </p>
       </div>
 
