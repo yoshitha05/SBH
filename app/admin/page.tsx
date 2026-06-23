@@ -83,7 +83,7 @@ export default function AdminDashboard() {
   }, []);
 
   const initials = profile?.name
-    ? profile.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+    ? profile.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()
     : "—";
 
   function startEdit() {
@@ -311,7 +311,7 @@ export default function AdminDashboard() {
               className="flex items-center gap-2.5 py-2 group"
               style={{ borderBottom: i < Math.min(activeTenants.length,5)-1 ? "1px solid rgba(35,47,79,0.07)" : "none", textDecoration: "none" }}>
               <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0" style={{ background: "rgba(214,176,109,0.18)", color: "#232f4f" }}>
-                {t.name.split(" ").map((n) => n[0]).join("").slice(0,2)}
+                {t.name.split(" ").map((n: string) => n[0]).join("").slice(0,2)}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate group-hover:underline" style={{ color: "#111827" }}>{t.name}</p>

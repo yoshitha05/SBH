@@ -72,7 +72,7 @@ export default async function TenantDetailsPage({
               className="w-12 h-12 rounded-full flex items-center justify-center text-base font-semibold flex-shrink-0"
               style={{ background: "#E8F0FE", color: "#1B4FBB" }}
             >
-              {tenant.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+              {tenant.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
             </div>
             <div>
               <h1 className="text-xl font-semibold" style={{ color: "#111827" }}>

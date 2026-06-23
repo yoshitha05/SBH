@@ -552,7 +552,7 @@ export default function AdminTenantsPage() {
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold"
                       style={{ background: "#F3F4F6", color: "#374151" }}>
-                      {t.name.split(" ").map((n) => n[0]).join("").slice(0,2)}
+                      {t.name.split(" ").map((n: string) => n[0]).join("").slice(0,2)}
                     </div>
                     <div>
                       <p className="text-sm font-semibold" style={{ color: "#111827" }}>{t.name}</p>

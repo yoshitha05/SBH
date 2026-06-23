@@ -100,7 +100,7 @@ export default function Sidebar() {
         name,
         email: user.email ?? "",
         role: profile?.role ? profile.role.charAt(0).toUpperCase() + profile.role.slice(1) : "—",
-        initials: name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase(),
+        initials: name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase(),
       });
     }
     loadUser();

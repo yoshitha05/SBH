@@ -223,7 +223,7 @@ export default function OwnerDashboard() {
               style={{ borderBottom: i < Math.min(activeTenants.length, 5) - 1 ? "1px solid rgba(27,79,187,0.07)" : "none", textDecoration: "none" }}>
               <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0"
                 style={{ background: "#E8F0FE", color: "#1B4FBB" }}>
-                {t.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                {t.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate group-hover:underline" style={{ color: "#111827" }}>{t.name}</p>
