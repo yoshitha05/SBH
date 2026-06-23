@@ -505,12 +505,14 @@ export default function AdminBuildingPage() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Expenditure");
 
+    if (!property) return;
     const fileName = `${property.name}_Expenditure_${new Date().toISOString().split("T")[0]}.xlsx`;
     XLSX.writeFile(wb, fileName);
     setShowExportMenu(false);
   }
 
   function downloadPDF() {
+    if (!property) return;
     const doc = new jsPDF();
     doc.setFontSize(14);
     doc.text(`${property.name} — Expenditure Report`, 14, 16);
