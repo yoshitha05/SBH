@@ -43,6 +43,7 @@ function blankCoTenant(): CoTenant {
 }
 
 type SupabaseTenant = {
+  owner_id: string;
   id: number;
   name: string;
   phone: string;
@@ -98,9 +99,13 @@ export default function AdminTenantsPage() {
     setLoading(true);
     setLoadError("");
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoadError("Not signed in."); setLoading(false); return; }
+
     const { data: tenantRows, error } = await supabase
       .from("tenants")
       .select("*")
+      .eq("owner_id", user.id)
       .order("id", { ascending: true });
 
     if (error) {
@@ -109,7 +114,7 @@ export default function AdminTenantsPage() {
       return;
     }
 
-    const { data: coTenantRows } = await supabase.from("co_tenants").select("*");
+    const { data: coTenantRows } = await supabase.from("co_tenants").select("*").eq("owner_id", user.id);
     const coTenantsByTenant = new Map<number, CoTenant[]>();
     (coTenantRows ?? []).forEach((c) => {
       const list = coTenantsByTenant.get(c.tenant_id) ?? [];
@@ -230,6 +235,7 @@ export default function AdminTenantsPage() {
       .from("tenants")
       .insert({
         name: newTenant.name.trim(),
+        owner_id: (await supabase.auth.getUser()).data.user?.id,
         building: newTenant.building,
         flat_no: newTenant.flatNo.trim(),
         rent: newTenant.rent,
@@ -255,6 +261,7 @@ export default function AdminTenantsPage() {
       const { error: coError } = await supabase.from("co_tenants").insert(
         validCoTenants.map((c) => ({
           tenant_id: inserted.id,
+          owner_id: inserted.owner_id,
           name: c.name,
           age: c.age ? Number(c.age) : null,
           phone: c.phone,
@@ -330,6 +337,7 @@ export default function AdminTenantsPage() {
     for (const co of editCoTenants) {
       const payload = {
         tenant_id: editingTenant.id,
+        owner_id: editingTenant.owner_id,
         name: co.name,
         age: co.age ? Number(co.age) : null,
         phone: co.phone,
