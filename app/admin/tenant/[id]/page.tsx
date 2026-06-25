@@ -70,6 +70,7 @@ function blankCoTenant(): CoTenant {
 }
 
 type SupabaseTenant = {
+  owner_id: string;
   id: number;
   name: string;
   phone: string;
@@ -100,10 +101,14 @@ export default function AdminTenantDetailsPage() {
     async function loadTenant() {
       setLoading(true);
       setLoadError("");
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoadError("Not signed in."); setLoading(false); return; }
+
       const { data, error } = await supabase
         .from("tenants")
         .select("*")
         .eq("id", id)
+        .eq("owner_id", user.id)
         .maybeSingle();
 
       if (error) {
@@ -134,7 +139,8 @@ export default function AdminTenantDetailsPage() {
       const { data, error } = await supabase
         .from("co_tenants")
         .select("*")
-        .eq("tenant_id", tenant.id);
+        .eq("tenant_id", tenant.id)
+        .eq("owner_id", tenant.owner_id);
 
       if (!error && data) {
         setCoTenants(
@@ -169,6 +175,7 @@ export default function AdminTenantDetailsPage() {
         .from("payment_history")
         .select("*")
         .eq("tenant_id", tenant.id)
+        .eq("owner_id", tenant.owner_id)
         .order("paid_on", { ascending: false });
       if (!error && data) setPayments(data);
     }
@@ -196,6 +203,7 @@ export default function AdminTenantDetailsPage() {
 
     const payload = {
       tenant_id: tenant.id,
+      owner_id: tenant.owner_id,
       month: paymentForm.month.trim(),
       amount: paymentForm.amount,
       paid_on: paymentForm.paid_on || null,
@@ -215,6 +223,7 @@ export default function AdminTenantDetailsPage() {
       .from("payment_history")
       .select("*")
       .eq("tenant_id", tenant.id)
+      .eq("owner_id", tenant.owner_id)
       .order("paid_on", { ascending: false });
     if (data) setPayments(data);
   }
@@ -289,6 +298,7 @@ export default function AdminTenantDetailsPage() {
         .from("documents")
         .select("*")
         .eq("tenant_id", tenant.id)
+        .eq("owner_id", tenant.owner_id)
         .order("uploaded_on", { ascending: false });
 
       if (error) {
@@ -402,6 +412,7 @@ export default function AdminTenantDetailsPage() {
     for (const co of editCoTenants) {
       const payload = {
         tenant_id: tenant!.id,
+        owner_id: tenant!.owner_id,
         name: co.name,
         age: co.age ? Number(co.age) : null,
         phone: co.phone,
@@ -421,7 +432,8 @@ export default function AdminTenantDetailsPage() {
     const { data: freshCoTenants } = await supabase
       .from("co_tenants")
       .select("*")
-      .eq("tenant_id", tenant!.id);
+      .eq("tenant_id", tenant!.id)
+      .eq("owner_id", tenant!.owner_id);
     if (freshCoTenants) {
       setCoTenants(freshCoTenants.map((c) => ({
         id: c.id, name: c.name ?? "", age: c.age ? String(c.age) : "",
@@ -506,6 +518,7 @@ export default function AdminTenantDetailsPage() {
       .from("documents")
       .insert({
         tenant_id: tenant.id,
+        owner_id: tenant.owner_id,
         file_name: file.name,
         file_path: filePath,
         uploaded_on: new Date().toISOString(),
