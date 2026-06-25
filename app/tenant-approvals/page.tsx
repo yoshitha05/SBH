@@ -50,7 +50,10 @@ export default function TenantApprovalsPage() {
   async function loadTenants() {
     setLoading(true);
     setLoadError("");
-    const { data, error } = await supabase.from("tenants").select("*").order("name");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoadError("Not signed in."); setLoading(false); return; }
+
+    const { data, error } = await supabase.from("tenants").select("*").eq("owner_id", user.id).order("name");
     if (error) {
       setLoadError(error.message);
     } else {
