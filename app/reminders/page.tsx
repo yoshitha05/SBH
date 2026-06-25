@@ -48,7 +48,10 @@ export default function RemindersPage() {
     setLoading(true);
     setLoadError("");
 
-    const { data: tenantRows, error: tError } = await supabase.from("tenants").select("*");
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoadError("Not signed in."); setLoading(false); return; }
+
+    const { data: tenantRows, error: tError } = await supabase.from("tenants").select("*").eq("owner_id", user.id);
     if (tError) {
       setLoadError(tError.message);
       setLoading(false);
@@ -58,6 +61,7 @@ export default function RemindersPage() {
     const { data: paymentRows, error: pError } = await supabase
       .from("payment_history")
       .select("*")
+      .eq("owner_id", user.id)
       .order("paid_on", { ascending: false });
     if (pError) {
       setLoadError(pError.message);
