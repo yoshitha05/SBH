@@ -29,7 +29,7 @@ type ColDef = { key: string; label: string; type: ColType; options?: string[] };
 type RowData = Record<string, string | number>;
 
 // Shape of a row from Supabase
-type SheetRow = { id: number; name: string; columns: ColDef[]; deletable: boolean };
+type SheetRow = { id: number; owner_id: string; name: string; columns: ColDef[]; deletable: boolean };
 type LedgerRow = { id: number; sheet_id: number; data: RowData };
 
 const BUILDINGS = ["Ohm", "NN Elite", "RVB", "Renuka", "Pearls", "Sree Harsha", "All buildings"];
@@ -71,9 +71,13 @@ export default function AdminExpenditurePage() {
     setLoading(true);
     setLoadError("");
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoadError("Not signed in."); setLoading(false); return; }
+
     const { data: sheetData, error: sheetError } = await supabase
       .from("ledger_sheets")
       .select("*")
+      .eq("owner_id", user.id)
       .order("id", { ascending: true });
 
     if (sheetError) {
@@ -85,6 +89,7 @@ export default function AdminExpenditurePage() {
     const { data: rowData, error: rowError } = await supabase
       .from("ledger_rows")
       .select("*")
+      .eq("owner_id", user.id)
       .order("id", { ascending: true });
 
     if (rowError) {
@@ -118,10 +123,14 @@ export default function AdminExpenditurePage() {
       setNoteLoading(true);
       setSavedMsg("");
 
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setNoteLoading(false); return; }
+
       const { data } = await supabase
         .from("expenditure_notes")
         .select("*")
         .eq("scope", noteTab)
+        .eq("owner_id", user.id)
         .maybeSingle();
 
       setCurrentNoteId(data?.id ?? null);
@@ -138,9 +147,11 @@ export default function AdminExpenditurePage() {
       const { error } = await supabase.from("expenditure_notes").update({ content: noteText }).eq("id", currentNoteId);
       if (error) { setSavedMsg(`Error: ${error.message}`); return; }
     } else {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setSavedMsg("Error: Not signed in."); return; }
       const { data, error } = await supabase
         .from("expenditure_notes")
-        .insert({ scope: noteTab, content: noteText })
+        .insert({ scope: noteTab, content: noteText, owner_id: user.id })
         .select()
         .single();
       if (error) { setSavedMsg(`Error: ${error.message}`); return; }
@@ -187,9 +198,12 @@ export default function AdminExpenditurePage() {
       else blankRow[c.key] = "";
     });
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoadError("Not signed in."); return; }
+
     const { data, error } = await supabase
       .from("ledger_rows")
-      .insert({ sheet_id: activeSheet.id, data: blankRow })
+      .insert({ sheet_id: activeSheet.id, data: blankRow, owner_id: user.id })
       .select()
       .single();
 
@@ -242,9 +256,12 @@ export default function AdminExpenditurePage() {
 
     const colsWithKeys = validCols.map((c, i) => ({ ...c, key: `col${i + 1}` }));
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { alert("Not signed in."); return; }
+
     const { data: newSheet, error } = await supabase
       .from("ledger_sheets")
-      .insert({ name: newSheetName.trim(), columns: colsWithKeys, deletable: true })
+      .insert({ name: newSheetName.trim(), columns: colsWithKeys, deletable: true, owner_id: user.id })
       .select()
       .single();
 
@@ -258,7 +275,7 @@ export default function AdminExpenditurePage() {
 
     const { data: firstRow } = await supabase
       .from("ledger_rows")
-      .insert({ sheet_id: newSheet.id, data: blankRow })
+      .insert({ sheet_id: newSheet.id, data: blankRow, owner_id: user.id })
       .select()
       .single();
 
