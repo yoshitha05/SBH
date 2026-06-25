@@ -70,9 +70,13 @@ export default function AdminPaymentsPage() {
     setLoading(true);
     setLoadError("");
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoadError("Not signed in."); setLoading(false); return; }
+
     const { data: payments, error: payError } = await supabase
       .from("payment_history")
       .select("*")
+      .eq("owner_id", user.id)
       .order("paid_on", { ascending: false });
 
     if (payError) {
@@ -83,7 +87,8 @@ export default function AdminPaymentsPage() {
 
     const { data: tenants, error: tenError } = await supabase
       .from("tenants")
-      .select("id, name, building, flat_no");
+      .select("id, name, building, flat_no")
+      .eq("owner_id", user.id);
 
     if (tenError) {
       setLoadError(tenError.message);
@@ -113,7 +118,9 @@ export default function AdminPaymentsPage() {
   // Tenants list for the Add Payment modal's dropdown
   useEffect(() => {
     async function loadTenantOptions() {
-      const { data } = await supabase.from("tenants").select("id, name, building, flat_no, rent").order("name");
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase.from("tenants").select("id, name, building, flat_no, rent").eq("owner_id", user.id).order("name");
       if (data) setTenantOptions(data);
     }
     loadTenantOptions();
@@ -139,10 +146,14 @@ export default function AdminPaymentsPage() {
     setAdding(true);
     setAddError("");
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setAddError("Not signed in."); setAdding(false); return; }
+
     const { data: inserted, error } = await supabase
       .from("payment_history")
       .insert({
         tenant_id: Number(addForm.tenant_id),
+        owner_id: user.id,
         month: addForm.month.trim(),
         amount: addForm.amount,
         paid_on: addForm.paid_on || null,
