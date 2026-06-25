@@ -1,22 +1,20 @@
 "use client";
 
 // components/dashboard/Sidebar.tsx
-// Fully monochrome — white sidebar, light gray accents, dark gray/black text.
 //
-// Now uses real Supabase Auth: signs out via supabase.auth.signOut()
-// instead of clearing the old leaseiq_role cookie, and shows the actual
-// logged-in user's name/email/role from the profiles table instead of
-// hardcoded fake people.
+// Simplified to admin-only: removed AI Insights and Reports from nav
+// (deprioritized per product direction), removed owner/tenant role
+// menus entirely since this app is now admin-only — tenants are managed
+// as data via Google Form submissions, not as logged-in accounts.
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import {
-  LayoutDashboard, Building2, Users, CreditCard,
-  Bell, BrainCircuit, FileText,
-  Wallet, ShieldCheck, FileSpreadsheet, ReceiptText,
-  Home, QrCode, LogOut, X, Mail, Calendar,
+  LayoutDashboard, Building2, Users, Bell,
+  Wallet, ShieldCheck, FileSpreadsheet,
+  Home, LogOut, X, Mail,
 } from "lucide-react";
 
 type NavItem = {
@@ -27,61 +25,26 @@ type NavItem = {
 };
 type NavGroup = { group: string; items: NavItem[] };
 
-const roleMenus: Record<string, NavGroup[]> = {
-  admin: [
-    { group: "Overview", items: [
-      { label: "Dashboard",   icon: LayoutDashboard, href: "/admin" },
-      { label: "Properties",  icon: Building2,       href: "/admin/properties" },
-      { label: "Tenants",     icon: Users,           href: "/admin/tenants" },
-    ]},
-    { group: "Finance", items: [
-      { label: "Payments",    icon: Wallet,          href: "/admin/payments" },
-      { label: "Expenditure", icon: FileSpreadsheet, href: "/admin/expenditure" },
-      { label: "Approvals",   icon: ShieldCheck,     href: "/admin/approvals", badge: 2 },
-    ]},
-    { group: "Intelligence", items: [
-      { label: "Reminders",   icon: Bell,            href: "/admin/reminders",  badge: 3 },
-      { label: "Reports",     icon: FileText,        href: "/admin/reports" },
-      { label: "AI Insights", icon: BrainCircuit,    href: "/admin/forecast" },
-    ]},
-  ],
-  owner: [
-    { group: "My Portfolio", items: [
-      { label: "Dashboard",   icon: LayoutDashboard, href: "/owner" },
-      { label: "Properties",  icon: Building2,       href: "/owner/properties" },
-      { label: "Payments",    icon: CreditCard,      href: "/owner/payments" },
-      { label: "Approvals",   icon: ShieldCheck,     href: "/owner/approvals", badge: 1 },
-    ]},
-    { group: "Actions", items: [
-      { label: "Reminders",   icon: Bell,            href: "/owner/reminders", badge: 2 },
-    ]},
-  ],
-  tenant: [
-    { group: "My Account", items: [
-      { label: "My Home",     icon: Home,            href: "/tenant" },
-      { label: "Payments",    icon: CreditCard,      href: "/tenant/payments" },
-      { label: "Pay Rent",    icon: QrCode,          href: "/tenant/pay" },
-      { label: "Reminders",   icon: Bell,            href: "/tenant/reminders" },
-      { label: "Receipts",    icon: ReceiptText,     href: "/tenant/receipts" },
-    ]},
-  ],
-};
+const adminMenu: NavGroup[] = [
+  { group: "Overview", items: [
+    { label: "Dashboard",   icon: LayoutDashboard, href: "/admin" },
+    { label: "Properties",  icon: Building2,       href: "/admin/properties" },
+    { label: "Tenants",     icon: Users,           href: "/admin/tenants" },
+  ]},
+  { group: "Finance", items: [
+    { label: "Payments",    icon: Wallet,          href: "/admin/payments" },
+    { label: "Expenditure", icon: FileSpreadsheet, href: "/admin/expenditure" },
+    { label: "Approvals",   icon: ShieldCheck,     href: "/admin/approvals" },
+  ]},
+  { group: "Actions", items: [
+    { label: "Reminders",   icon: Bell,            href: "/admin/reminders" },
+  ]},
+];
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const router   = useRouter();
   const [showProfile, setShowProfile] = useState(false);
 
-  const role: "admin" | "owner" | "tenant" =
-    pathname.startsWith("/admin")  ? "admin"  :
-    pathname.startsWith("/owner")  ? "owner"  :
-    pathname.startsWith("/tenant") ? "tenant" :
-    "admin";
-
-  const groups = roleMenus[role];
-
-  // Real logged-in user info, loaded from Supabase Auth + profiles —
-  // replaces the old hardcoded userInfoMap fake people.
   const [userInfo, setUserInfo] = useState<{ name: string; email: string; role: string; initials: string } | null>(null);
 
   useEffect(() => {
@@ -113,9 +76,7 @@ export default function Sidebar() {
   }
 
   function isActive(href: string) {
-    if (href === "/admin" || href === "/owner" || href === "/tenant") {
-      return pathname === href;
-    }
+    if (href === "/admin") return pathname === href;
     return pathname.startsWith(href);
   }
 
@@ -124,7 +85,6 @@ export default function Sidebar() {
       <aside className="w-64 min-h-screen flex flex-col flex-shrink-0"
         style={{ background: "#ffffff", borderRight: "1px solid #E5E7EB" }}>
 
-        {/* Brand */}
         <div className="flex items-center gap-2 px-5 py-4" style={{ borderBottom: "1px solid #E5E7EB" }}>
           <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
             style={{ background: "#374151" }}>
@@ -135,30 +95,28 @@ export default function Sidebar() {
           </span>
         </div>
 
-        {/* Role badge */}
         <div className="px-5 pt-4 pb-2">
           <span className="text-xs font-semibold px-3 py-1 rounded-full"
             style={{ background: "#F3F4F6", color: "#374151", border: "1px solid #E5E7EB" }}>
-            {userInfo?.role ?? role.charAt(0).toUpperCase() + role.slice(1)}
+            {userInfo?.role ?? "Admin"}
           </span>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 px-3 py-2 overflow-y-auto">
-          {groups.map((group) => (
+          {adminMenu.map((group) => (
             <div key={group.group} className="mb-5">
               <p className="text-xs font-semibold uppercase tracking-widest px-3 mb-2" style={{ color: "#9CA3AF" }}>
                 {group.group}
               </p>
               <div className="space-y-0.5">
                 {group.items.map((item) => {
-                  const Icon   = item.icon;
+                  const Icon = item.icon;
                   const active = isActive(item.href);
                   return (
                     <Link key={item.label} href={item.href}
                       className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all duration-150"
                       style={{
-                        color:      active ? "#111827" : "#6B7280",
+                        color: active ? "#111827" : "#6B7280",
                         background: active ? "#F3F4F6" : "transparent",
                         borderLeft: active ? "3px solid #9CA3AF" : "3px solid transparent",
                         fontWeight: active ? 600 : 400,
@@ -179,7 +137,6 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        {/* User footer */}
         <div className="px-4 py-3" style={{ borderTop: "1px solid #E5E7EB" }}>
           <button onClick={() => setShowProfile(true)}
             className="flex items-center gap-2.5 px-2 py-2 rounded-lg w-full transition"
@@ -199,7 +156,6 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* Profile modal */}
       {showProfile && (
         <div className="fixed inset-0 z-50 flex items-end justify-start"
           style={{ background: "rgba(0,0,0,0.35)" }}
