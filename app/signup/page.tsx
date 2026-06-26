@@ -2,29 +2,24 @@
 
 // app/signup/page.tsx
 //
-// Real account creation via Supabase Auth. After signing up, we also
-// create a matching row in `profiles` so the app knows this user's role.
-// Tenant signups additionally need to be linked to an existing tenant_id
-// — for now we ask for the tenant's email to match against the tenants
-// table; a more polished invite flow can replace this later.
+// Now requires a valid invite code (from an approved access request)
+// to sign up as Admin or Owner. The code must match the exact email
+// and role it was generated for, and gets marked used after signup.
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
-import { Home, ShieldCheck, Building2, User, Eye, EyeOff } from "lucide-react";
+import { Home, Eye, EyeOff } from "lucide-react";
 
-type Role = "admin" | "owner" | "tenant";
-
-const ROLE_ROUTES: Record<Role, string> = {
+const ROLE_ROUTES: Record<string, string> = {
   admin: "/admin",
-  owner: "/owner",
-  tenant: "/tenant",
+  owner: "/admin", // owner currently lands on the same admin UI for this stage
 };
 
 export default function SignupPage() {
   const router = useRouter();
-  const [role, setRole] = useState<Role>("admin");
+  const [inviteCode, setInviteCode] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,8 +29,8 @@ export default function SignupPage() {
 
   async function handleSignup() {
     setError("");
-    if (!name.trim() || !email.trim() || !password) {
-      setError("Please fill in all fields.");
+    if (!inviteCode.trim() || !name.trim() || !email.trim() || !password) {
+      setError("Please fill in all fields, including your invite code.");
       return;
     }
     if (password.length < 6) {
@@ -43,6 +38,28 @@ export default function SignupPage() {
       return;
     }
     setLoading(true);
+
+    // Validate the invite code first, before creating any account.
+    const { data: invite, error: inviteError } = await supabase
+      .from("invite_codes")
+      .select("*")
+      .eq("code", inviteCode.trim())
+      .eq("status", "approved")
+      .is("used_at", null)
+      .maybeSingle();
+
+    if (inviteError || !invite) {
+      setError("Invalid or already-used invite code.");
+      setLoading(false);
+      return;
+    }
+    if (invite.email.toLowerCase() !== email.trim().toLowerCase()) {
+      setError("This invite code was issued for a different email address.");
+      setLoading(false);
+      return;
+    }
+
+    const role = invite.role;
 
     const { data: authData, error: signupError } = await supabase.auth.signUp({
       email: email.trim(),
@@ -60,29 +77,11 @@ export default function SignupPage() {
       return;
     }
 
-    // For tenant signups, find their matching tenant_id by email so their
-    // login is linked to their existing tenant record.
-    let tenantId: number | null = null;
-    if (role === "tenant") {
-      const { data: matchedTenant } = await supabase
-        .from("tenants")
-        .select("id")
-        .eq("email", email.trim())
-        .maybeSingle();
-
-      if (!matchedTenant) {
-        setError("No tenant record found with this email. Ask your admin to add you as a tenant first, using this exact email address.");
-        setLoading(false);
-        return;
-      }
-      tenantId = matchedTenant.id;
-    }
-
     const { error: profileError } = await supabase.from("profiles").insert({
       id: authData.user.id,
       role,
       name: name.trim(),
-      tenant_id: tenantId,
+      tenant_id: null,
     });
 
     if (profileError) {
@@ -91,10 +90,11 @@ export default function SignupPage() {
       return;
     }
 
-    // If email confirmation is required, there may be no active session
-    // yet — handle both cases.
+    // Mark the invite code as used so it can't be reused.
+    await supabase.from("invite_codes").update({ used_at: new Date().toISOString() }).eq("id", invite.id);
+
     if (authData.session) {
-      router.push(ROLE_ROUTES[role]);
+      router.push(ROLE_ROUTES[role] ?? "/admin");
     } else {
       setError("Account created! Check your email to confirm, then sign in.");
       setLoading(false);
@@ -118,33 +118,15 @@ export default function SignupPage() {
 
         <div className="p-6">
           <h1 className="text-xl font-semibold mb-1" style={{ color: "#111827" }}>Create account</h1>
-          <p className="text-sm mb-5" style={{ color: "#6B7280" }}>Sign up for a new account</p>
+          <p className="text-sm mb-5" style={{ color: "#6B7280" }}>Sign up using your invite code</p>
 
-          <div className="grid grid-cols-3 gap-2 mb-5">
-            {([
-              { id: "admin" as Role, icon: ShieldCheck, label: "Admin" },
-              { id: "owner" as Role, icon: Building2, label: "Owner" },
-              { id: "tenant" as Role, icon: User, label: "Tenant" },
-            ]).map(({ id, icon: Icon, label }) => (
-              <button key={id} onClick={() => setRole(id)}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-xl"
-                style={{
-                  border: role === id ? "2px solid #d6b06d" : "1.5px solid rgba(35,47,79,0.16)",
-                  background: role === id ? "#fbf5ea" : "rgba(255,255,255,0.9)",
-                  cursor: "pointer",
-                }}>
-                <Icon size={18} style={{ color: role === id ? "#232f4f" : "#9CA3AF" }} />
-                <span className="text-xs font-medium" style={{ color: "#111827" }}>{label}</span>
-              </button>
-            ))}
+          <div className="mb-3">
+            <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Invite code</label>
+            <input value={inviteCode} onChange={(e) => setInviteCode(e.target.value)}
+              placeholder="e.g. SBH-7K2P9Q"
+              className="w-full px-3 py-2.5 text-sm rounded-lg font-mono"
+              style={{ border: "1.5px solid rgba(35,47,79,0.18)", outline: "none", color: "#111827", background: "#fff" }} />
           </div>
-
-          {role === "tenant" && (
-            <div className="text-xs px-3 py-2 rounded-lg mb-4"
-              style={{ background: "#E6F1FB", color: "#0C447C", lineHeight: 1.6 }}>
-              Use the exact email your admin/owner already has on file for you as a tenant.
-            </div>
-          )}
 
           <div className="mb-3">
             <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Full name</label>
@@ -156,6 +138,7 @@ export default function SignupPage() {
           <div className="mb-3">
             <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Email</label>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder="Must match the email your invite code was issued for"
               className="w-full px-3 py-2.5 text-sm rounded-lg"
               style={{ border: "1.5px solid rgba(35,47,79,0.18)", outline: "none", color: "#111827", background: "#fff" }} />
           </div>
@@ -193,6 +176,9 @@ export default function SignupPage() {
           </button>
 
           <p className="text-xs text-center mt-4" style={{ color: "#9CA3AF" }}>
+            Don't have an invite code? <Link href="/request-access" style={{ color: "#b8924c" }}>Request access</Link>
+          </p>
+          <p className="text-xs text-center mt-2" style={{ color: "#9CA3AF" }}>
             Already have an account? <Link href="/login" style={{ color: "#b8924c" }}>Sign in</Link>
           </p>
         </div>

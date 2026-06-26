@@ -2,10 +2,8 @@
 
 // components/dashboard/Sidebar.tsx
 //
-// Simplified to admin-only: removed AI Insights and Reports from nav
-// (deprioritized per product direction), removed owner/tenant role
-// menus entirely since this app is now admin-only — tenants are managed
-// as data via Google Form submissions, not as logged-in accounts.
+// Admin-only nav. Added "Access requests" so the admin can find the new
+// invite-code review page.
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -13,7 +11,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import {
   LayoutDashboard, Building2, Users, Bell,
-  Wallet, ShieldCheck, FileSpreadsheet,
+  Wallet, ShieldCheck, FileSpreadsheet, UserPlus,
   Home, LogOut, X, Mail,
 } from "lucide-react";
 
@@ -37,7 +35,8 @@ const adminMenu: NavGroup[] = [
     { label: "Approvals",   icon: ShieldCheck,     href: "/admin/approvals" },
   ]},
   { group: "Actions", items: [
-    { label: "Reminders",   icon: Bell,            href: "/admin/reminders" },
+    { label: "Reminders",      icon: Bell,     href: "/admin/reminders" },
+    { label: "Access requests", icon: UserPlus, href: "/admin/access-requests" },
   ]},
 ];
 

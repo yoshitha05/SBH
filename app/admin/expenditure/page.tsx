@@ -74,6 +74,7 @@ export default function AdminExpenditurePage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoadError("Not signed in."); setLoading(false); return; }
 
+
     const { data: sheetData, error: sheetError } = await supabase
       .from("ledger_sheets")
       .select("*")
