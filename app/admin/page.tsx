@@ -2,45 +2,19 @@
 
 // app/admin/page.tsx
 //
-// The profile button/popup on this page was a SEPARATE hardcoded widget
-// from components/dashboard/Sidebar.tsx — that's why fixing the sidebar
-// earlier didn't fix this one. Now uses real Supabase Auth + profiles
-// data, with an Edit option for Role, Buildings, and Member since.
+// Converted from static fake data (data/properties.ts, data/tenants.ts,
+// data/collections.ts) to real Supabase queries, scoped by owner_id.
+// This is what was causing every account to see the same hardcoded
+// numbers regardless of who was logged in.
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { properties, getTotalFlats, getTotalOccupied, getTotalCollection, getOverdueCount } from "@/data/properties";
-import { tenants } from "@/data/tenants";
-import { collections } from "@/data/collections";
 import { supabase } from "@/lib/supabaseClient";
 import {
   Wallet, TrendingUp, Users, ArrowRight, CheckCircle,
   AlertTriangle, Brain, CreditCard, Bell, ShieldCheck,
-  FileText, Building2, LogOut, X, Mail, Calendar, Pencil, Save,
+  FileText, Building2, LogOut, X, Mail, Calendar, Pencil, Save, Loader2,
 } from "lucide-react";
-
-const thisMonth      = collections.filter((c) => c.month === "Jun 2026");
-const totalRent      = thisMonth.reduce((s, c) => s + c.amount, 0);
-const collected      = thisMonth.filter((c) => c.status === "paid").reduce((s, c) => s + c.amount, 0);
-const outstanding    = thisMonth.filter((c) => c.status !== "paid").reduce((s, c) => s + c.amount, 0);
-const overdueTenants = tenants.filter((t) => t.paymentStatus === "Overdue");
-const pendingTenants = tenants.filter((t) => !t.approved);
-const activeTenants  = tenants.filter((t) => t.approved && t.accessEnabled);
-const collectionPct  = totalRent > 0 ? Math.round((collected / totalRent) * 100) : 0;
-
-const recentActivity = [
-  ...thisMonth.filter((c) => c.paidOn)
-    .sort((a, b) => (b.paidOn ?? "").localeCompare(a.paidOn ?? ""))
-    .slice(0, 4)
-    .map((c) => ({ type: "payment" as const, label: `${c.tenantName} paid ₹${c.amount.toLocaleString("en-IN")}`, sub: `${c.building} · Flat ${c.flatNo} · ${c.paidOn}`, color: "#1D9E75" })),
-  ...overdueTenants.slice(0, 2).map((t) => ({ type: "alert" as const, label: `${t.name} — rent overdue`, sub: `${t.building} · Flat ${t.flatNo} · ₹${t.monthlyDue.toLocaleString("en-IN")} due`, color: "#E24B4A" })),
-].slice(0, 5);
-
-const aiRecs = [
-  { title: `Send final notice to ${overdueTenants[0]?.name ?? "overdue tenant"}`, desc: `${overdueTenants[0]?.building ?? ""} · Flat ${overdueTenants[0]?.flatNo ?? ""} — 12 days overdue, 78% non-payment risk.`, action: "/admin/reminders", actionLabel: "Send reminder", bg: "#FCEBEB", border: "#F7C1C1", titleColor: "#791F1F" },
-  { title: `${pendingTenants.length} tenant${pendingTenants.length !== 1 ? "s" : ""} awaiting approval`, desc: "New tenants submitted via Google Form. Approve to grant login access.", action: "/admin/approvals", actionLabel: "Review approvals", bg: "#FAEEDA", border: "#FAC775", titleColor: "#633806" },
-  { title: "Schedule July pre-reminders", desc: "AI suggests sending pre-reminders on June 25 based on tenant response patterns.", action: "/admin/reminders", actionLabel: "Schedule", bg: "#f4ede1", border: "rgba(214,176,109,0.35)", titleColor: "#232f4f" },
-];
 
 type AdminProfile = {
   name: string;
@@ -48,6 +22,25 @@ type AdminProfile = {
   role: string;
   buildings: string | null;
   member_since: string | null;
+};
+
+type TenantRow = {
+  id: number;
+  name: string;
+  building: string;
+  flat_no: string;
+  approved: boolean;
+  access_enabled: boolean;
+  status: string;
+};
+
+type PaymentRow = {
+  id: number;
+  tenant_id: number;
+  month: string;
+  amount: number;
+  paid_on: string | null;
+  status: string;
 };
 
 export default function AdminDashboard() {
@@ -58,28 +51,83 @@ export default function AdminDashboard() {
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState("");
 
-  useEffect(() => {
-    async function loadProfile() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [buildingCount, setBuildingCount] = useState(0);
+  const [totalFlats, setTotalFlats] = useState(0);
+  const [tenants, setTenants] = useState<TenantRow[]>([]);
+  const [payments, setPayments] = useState<PaymentRow[]>([]);
 
-      const { data } = await supabase
-        .from("profiles")
-        .select("name, role, buildings, member_since")
-        .eq("id", user.id)
-        .maybeSingle();
+  async function loadDashboardData() {
+    setLoading(true);
+    setLoadError("");
 
-      if (data) {
-        setProfile({
-          name: data.name ?? user.email ?? "Unknown",
-          email: user.email ?? "",
-          role: data.role ?? "admin",
-          buildings: data.buildings,
-          member_since: data.member_since,
-        });
-      }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setLoadError("Not signed in.");
+      setLoading(false);
+      return;
     }
-    loadProfile();
+
+    const { data: profileData } = await supabase
+      .from("profiles")
+      .select("name, role, buildings, member_since")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileData) {
+      setProfile({
+        name: profileData.name ?? user.email ?? "Unknown",
+        email: user.email ?? "",
+        role: profileData.role ?? "admin",
+        buildings: profileData.buildings,
+        member_since: profileData.member_since,
+      });
+    }
+
+    const { data: properties, error: propError } = await supabase
+      .from("properties")
+      .select("total_flats")
+      .eq("owner_id", user.id);
+
+    if (propError) {
+      setLoadError(propError.message);
+      setLoading(false);
+      return;
+    }
+    setBuildingCount(properties?.length ?? 0);
+    setTotalFlats((properties ?? []).reduce((s, p) => s + (p.total_flats ?? 0), 0));
+
+    const { data: tenantData, error: tenError } = await supabase
+      .from("tenants")
+      .select("id, name, building, flat_no, approved, access_enabled, status")
+      .eq("owner_id", user.id);
+
+    if (tenError) {
+      setLoadError(tenError.message);
+      setLoading(false);
+      return;
+    }
+    setTenants(tenantData ?? []);
+
+    const { data: paymentData, error: payError } = await supabase
+      .from("payment_history")
+      .select("id, tenant_id, month, amount, paid_on, status")
+      .eq("owner_id", user.id)
+      .order("paid_on", { ascending: false });
+
+    if (payError) {
+      setLoadError(payError.message);
+      setLoading(false);
+      return;
+    }
+    setPayments(paymentData ?? []);
+
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadDashboardData();
   }, []);
 
   const initials = profile?.name
@@ -126,6 +174,82 @@ export default function AdminDashboard() {
     window.location.href = "/login";
   }
 
+  if (loading) {
+    return (
+      <div className="p-10 text-center" style={{ color: "#9CA3AF" }}>
+        <Loader2 size={28} className="mx-auto mb-3 animate-spin opacity-50" />
+        <p className="text-sm">Loading dashboard...</p>
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="p-10 text-center" style={{ color: "#A32D2D" }}>
+        <AlertTriangle size={32} className="mx-auto mb-3 opacity-50" />
+        <p className="text-sm font-medium">Couldn't load dashboard data</p>
+        <p className="text-xs mt-1" style={{ color: "#9CA3AF" }}>{loadError}</p>
+      </div>
+    );
+  }
+
+  // Derive everything from real data, scoped to whoever's logged in.
+  const tenantMap = new Map(tenants.map((t) => [t.id, t]));
+  const currentMonth = [...new Set(payments.map((p) => p.month))][0] ?? null;
+  const thisMonthPayments = currentMonth ? payments.filter((p) => p.month === currentMonth) : [];
+
+  const totalRent = thisMonthPayments.reduce((s, p) => s + p.amount, 0);
+  const collected = thisMonthPayments.filter((p) => p.status === "Paid").reduce((s, p) => s + p.amount, 0);
+  const outstanding = thisMonthPayments.filter((p) => p.status !== "Paid").reduce((s, p) => s + p.amount, 0);
+  const overdueCount = thisMonthPayments.filter((p) => p.status === "Late").length;
+  const collectionPct = totalRent > 0 ? Math.round((collected / totalRent) * 100) : 0;
+
+  const activeTenants = tenants.filter((t) => t.approved && t.access_enabled);
+  const pendingTenants = tenants.filter((t) => !t.approved);
+  const overdueTenantNames = thisMonthPayments
+    .filter((p) => p.status === "Late")
+    .map((p) => tenantMap.get(p.tenant_id))
+    .filter(Boolean);
+
+  const recentActivity = [
+    ...payments.filter((p) => p.paid_on)
+      .sort((a, b) => (b.paid_on ?? "").localeCompare(a.paid_on ?? ""))
+      .slice(0, 4)
+      .map((p) => {
+        const t = tenantMap.get(p.tenant_id);
+        return {
+          type: "payment" as const,
+          label: `${t?.name ?? "Unknown"} paid ₹${p.amount.toLocaleString("en-IN")}`,
+          sub: `${t?.building ?? "—"} · Flat ${t?.flat_no ?? "—"} · ${p.paid_on}`,
+          color: "#1D9E75",
+        };
+      }),
+    ...overdueTenantNames.slice(0, 2).map((t: any) => ({
+      type: "alert" as const,
+      label: `${t.name} — rent overdue`,
+      sub: `${t.building} · Flat ${t.flat_no}`,
+      color: "#E24B4A",
+    })),
+  ].slice(0, 5);
+
+  const firstOverdue = overdueTenantNames[0] as TenantRow | undefined;
+  const aiRecs = [
+    {
+      title: firstOverdue ? `Send final notice to ${firstOverdue.name}` : "No overdue tenants this month",
+      desc: firstOverdue ? `${firstOverdue.building} · Flat ${firstOverdue.flat_no} — marked Late this month.` : "Everything is on track.",
+      action: "/admin/reminders", actionLabel: "Send reminder", bg: "#FCEBEB", border: "#F7C1C1", titleColor: "#791F1F",
+    },
+    {
+      title: `${pendingTenants.length} tenant${pendingTenants.length !== 1 ? "s" : ""} awaiting approval`,
+      desc: "New tenants submitted via Google Form. Approve to grant access.",
+      action: "/admin/approvals", actionLabel: "Review approvals", bg: "#FAEEDA", border: "#FAC775", titleColor: "#633806",
+    },
+    {
+      title: "Review this month's reminders",
+      desc: "Check who's due or overdue and follow up.",
+      action: "/admin/reminders", actionLabel: "Open reminders", bg: "#f4ede1", border: "rgba(214,176,109,0.35)", titleColor: "#232f4f",
+    },
+  ];
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
 
@@ -134,7 +258,7 @@ export default function AdminDashboard() {
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: "#18233c" }}>Admin Dashboard</h1>
           <p className="text-sm mt-0.5" style={{ color: "#6B7280" }}>
-            June 2026 · {properties.length} buildings · {getTotalOccupied()} of {getTotalFlats()} flats occupied
+            {currentMonth ?? "No payments yet"} · {buildingCount} building{buildingCount !== 1 ? "s" : ""} · {activeTenants.length} of {totalFlats} flats occupied
           </p>
         </div>
         <button onClick={() => setShowProfile(true)}
@@ -196,7 +320,6 @@ export default function AdminDashboard() {
                     className="w-full px-3 py-2 text-sm rounded-lg" style={{ border: "1.5px solid rgba(35,47,79,0.2)", color: "#111827" }}>
                     <option value="admin">Admin</option>
                     <option value="owner">Owner</option>
-                    <option value="tenant">Tenant</option>
                   </select>
                 </div>
                 <div>
@@ -239,7 +362,7 @@ export default function AdminDashboard() {
         <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.88)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><Wallet size={13} /> Total rent</div>
           <div className="text-2xl font-semibold" style={{ color: "#111827" }}>₹{(totalRent/100000).toFixed(1)}L</div>
-          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>June 2026 · {properties.length} buildings</div>
+          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{currentMonth ?? "—"} · {buildingCount} buildings</div>
         </div>
         <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.88)", border: "2px solid #d6b06d" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><TrendingUp size={13} /> Collected</div>
@@ -249,7 +372,7 @@ export default function AdminDashboard() {
         <div className="rounded-lg p-4" style={{ background: "#fbeee2", border: "1.5px solid #e5c8a4" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><AlertTriangle size={13} /> Outstanding</div>
           <div className="text-2xl font-semibold" style={{ color: "#A32D2D" }}>₹{(outstanding/100000).toFixed(1)}L</div>
-          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{getOverdueCount()} flats overdue</div>
+          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{overdueCount} payments overdue</div>
         </div>
         <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.88)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><Users size={13} /> Tenants</div>
@@ -261,7 +384,7 @@ export default function AdminDashboard() {
       {/* Rent status progress */}
       <div className="rounded-xl p-4 mb-6" style={{ background: "rgba(255,255,255,0.92)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium" style={{ color: "#111827" }}>June 2026 rent status</span>
+          <span className="text-sm font-medium" style={{ color: "#111827" }}>{currentMonth ?? "This month"} rent status</span>
           <span className="text-sm font-semibold" style={{ color: "#0F6E56" }}>{collectionPct}% collected</span>
         </div>
         <div className="h-2.5 rounded-full mb-2" style={{ background: "#E5E7EB" }}>
@@ -270,7 +393,7 @@ export default function AdminDashboard() {
         <div className="flex gap-6 text-xs" style={{ color: "#9CA3AF" }}>
           <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: "#1D9E75" }} />Paid ₹{collected.toLocaleString("en-IN")}</span>
           <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: "#E24B4A" }} />Outstanding ₹{outstanding.toLocaleString("en-IN")}</span>
-          <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: "#9CA3AF" }} />{getTotalFlats()} total flats</span>
+          <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: "#9CA3AF" }} />{totalFlats} total flats</span>
         </div>
       </div>
 
@@ -279,7 +402,7 @@ export default function AdminDashboard() {
         <div className="lg:col-span-2 rounded-xl p-5" style={{ background: "rgba(255,255,255,0.92)", border: "2px solid #d6b06d" }}>
           <div className="flex items-center gap-2 mb-4">
             <Brain size={16} style={{ color: "#232f4f" }} />
-            <h2 className="text-sm font-semibold" style={{ color: "#111827" }}>AI recommendations</h2>
+            <h2 className="text-sm font-semibold" style={{ color: "#111827" }}>Recommendations</h2>
           </div>
           <div className="space-y-3">
             {aiRecs.map((rec, i) => (
@@ -306,7 +429,9 @@ export default function AdminDashboard() {
             </div>
             <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "#f3ead8", color: "#6b4b16" }}>{activeTenants.length} active</span>
           </div>
-          {activeTenants.slice(0, 5).map((t, i) => (
+          {activeTenants.length === 0 ? (
+            <p className="text-xs text-center py-6" style={{ color: "#9CA3AF" }}>No active tenants yet</p>
+          ) : activeTenants.slice(0, 5).map((t, i) => (
             <Link key={t.id} href={`/admin/tenants`}
               className="flex items-center gap-2.5 py-2 group"
               style={{ borderBottom: i < Math.min(activeTenants.length,5)-1 ? "1px solid rgba(35,47,79,0.07)" : "none", textDecoration: "none" }}>
@@ -315,12 +440,8 @@ export default function AdminDashboard() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium truncate group-hover:underline" style={{ color: "#111827" }}>{t.name}</p>
-                <p className="text-xs truncate" style={{ color: "#9CA3AF" }}>{t.building} · {t.flatNo}</p>
+                <p className="text-xs truncate" style={{ color: "#9CA3AF" }}>{t.building} · {t.flat_no}</p>
               </div>
-              <span className="text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0"
-                style={{ background: t.paymentStatus==="Paid"?"#E1F5EE":t.paymentStatus==="Overdue"?"#FCEBEB":"#FAEEDA", color: t.paymentStatus==="Paid"?"#085041":t.paymentStatus==="Overdue"?"#791F1F":"#633806" }}>
-                {t.paymentStatus}
-              </span>
             </Link>
           ))}
           <Link href="/admin/tenants" className="flex items-center gap-1 mt-3 text-xs font-medium" style={{ color: "#b8924c", textDecoration: "none" }}>
@@ -336,7 +457,9 @@ export default function AdminDashboard() {
             <h2 className="text-sm font-semibold" style={{ color: "#111827" }}>Recent activity</h2>
             <Link href="/admin/payments" className="text-xs font-medium" style={{ color: "#b8924c" }}>All transactions →</Link>
           </div>
-          {recentActivity.map((a, i) => (
+          {recentActivity.length === 0 ? (
+            <p className="text-xs text-center py-6" style={{ color: "#9CA3AF" }}>No activity yet</p>
+          ) : recentActivity.map((a, i) => (
             <div key={i} className="flex items-start gap-3 py-2.5"
               style={{ borderBottom: i < recentActivity.length-1 ? "1px solid rgba(27,79,187,0.07)" : "none" }}>
               <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: a.color+"18" }}>
