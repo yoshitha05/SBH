@@ -65,7 +65,7 @@ type SupabaseTenant = {
 };
 
 const EMPTY_FORM = {
-  name: "", building: BUILDINGS[0], flatNo: "", rent: 0, phone: "", email: "",
+  name: "", building: BUILDINGS[0], flatNo: "", rent: "", phone: "", email: "",
   age: "", aadhar: "",
 };
 
@@ -238,7 +238,7 @@ export default function AdminTenantsPage() {
         owner_id: (await supabase.auth.getUser()).data.user?.id,
         building: newTenant.building,
         flat_no: newTenant.flatNo.trim(),
-        rent: newTenant.rent,
+        rent: Number(newTenant.rent) || 0,
         phone: newTenant.phone,
         email: newTenant.email,
         age: newTenant.age ? Number(newTenant.age) : null,
@@ -283,7 +283,7 @@ export default function AdminTenantsPage() {
   function openEditModal(t: SupabaseTenant) {
     setEditingTenant(t);
     setEditForm({
-      name: t.name, building: t.building, flatNo: t.flat_no, rent: t.rent,
+      name: t.name, building: t.building, flatNo: t.flat_no, rent: String(t.rent),
       phone: t.phone, email: t.email ?? "",
       age: t.age ? String(t.age) : "", aadhar: t.aadhar ?? "",
     });
@@ -673,7 +673,7 @@ export default function AdminTenantsPage() {
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Monthly rent (₹)</label>
-                  <input type="number" value={newTenant.rent} onChange={(e) => setNewTenant({ ...newTenant, rent: +e.target.value || 0 })}
+                  <input type="number" value={newTenant.rent} onChange={(e) => setNewTenant({ ...newTenant, rent: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg"
                     style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
                 </div>
@@ -781,7 +781,7 @@ export default function AdminTenantsPage() {
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Rent (₹)</label>
-                  <input type="number" value={editForm.rent} onChange={(e) => setEditForm({ ...editForm, rent: +e.target.value || 0 })}
+                  <input type="number" value={editForm.rent} onChange={(e) => setEditForm({ ...editForm, rent: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg"
                     style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
                 </div>
