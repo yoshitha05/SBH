@@ -61,7 +61,7 @@ export default function AdminPaymentsPage() {
   // attach a receipt file right away, all in one step ──
   const [tenantOptions, setTenantOptions] = useState<{ id: number; name: string; building: string; flat_no: string; rent: number }[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [addForm, setAddForm] = useState({ tenant_id: "", month: "", amount: 0, paid_on: "", status: "Paid", payment_mode: "UPI", due_date: "" });
+  const [addForm, setAddForm] = useState({ tenant_id: "", month: "", amount: "", paid_on: "", status: "Paid", payment_mode: "UPI", due_date: "" });
   const [addReceiptFile, setAddReceiptFile] = useState<File | null>(null);
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
@@ -127,7 +127,7 @@ export default function AdminPaymentsPage() {
   }, []);
 
   function openAddModal() {
-    setAddForm({ tenant_id: "", month: "", amount: 0, paid_on: new Date().toISOString().split("T")[0], status: "Paid", payment_mode: "UPI", due_date: "" });
+    setAddForm({ tenant_id: "", month: "", amount: "", paid_on: new Date().toISOString().split("T")[0], status: "Paid", payment_mode: "UPI", due_date: "" });
     setAddReceiptFile(null);
     setAddError("");
     setShowAddModal(true);
@@ -135,7 +135,7 @@ export default function AdminPaymentsPage() {
 
   function selectTenantForAdd(tenantId: string) {
     const t = tenantOptions.find((opt) => String(opt.id) === tenantId);
-    setAddForm((prev) => ({ ...prev, tenant_id: tenantId, amount: t?.rent ?? prev.amount }));
+    setAddForm((prev) => ({ ...prev, tenant_id: tenantId, amount: t?.rent !== undefined ? String(t.rent) : prev.amount }));
   }
 
   async function submitAddPayment() {
@@ -155,7 +155,7 @@ export default function AdminPaymentsPage() {
         tenant_id: Number(addForm.tenant_id),
         owner_id: user.id,
         month: addForm.month.trim(),
-        amount: addForm.amount,
+        amount: Number(addForm.amount) || 0,
         paid_on: addForm.paid_on || null,
         status: addForm.status,
         payment_mode: addForm.payment_mode || null,
@@ -537,7 +537,7 @@ export default function AdminPaymentsPage() {
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Amount (₹)</label>
-                  <input type="number" value={addForm.amount} onChange={(e) => setAddForm({ ...addForm, amount: +e.target.value || 0 })}
+                  <input type="number" value={addForm.amount} onChange={(e) => setAddForm({ ...addForm, amount: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg" style={{ border: "1.5px solid rgba(27,79,187,0.2)", color: "#111827", outline: "none" }} />
                 </div>
               </div>

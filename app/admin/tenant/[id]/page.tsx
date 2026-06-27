@@ -166,7 +166,7 @@ export default function AdminTenantDetailsPage() {
   const [paymentsError, setPaymentsError] = useState("");
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [editingPayment, setEditingPayment] = useState<PaymentEntry | null>(null);
-  const [paymentForm, setPaymentForm] = useState({ month: "", amount: 0, paid_on: "", status: "Paid" });
+  const [paymentForm, setPaymentForm] = useState({ month: "", amount: "", paid_on: "", status: "Paid" });
 
   useEffect(() => {
     async function loadPayments() {
@@ -184,13 +184,13 @@ export default function AdminTenantDetailsPage() {
 
   function openAddPaymentModal() {
     setEditingPayment(null);
-    setPaymentForm({ month: "", amount: tenant?.rent ?? 0, paid_on: new Date().toISOString().split("T")[0], status: "Paid" });
+    setPaymentForm({ month: "", amount: tenant?.rent !== undefined ? String(tenant.rent) : "", paid_on: new Date().toISOString().split("T")[0], status: "Paid" });
     setPaymentsError("");
     setShowPaymentModal(true);
   }
   function openEditPaymentModal(p: PaymentEntry) {
     setEditingPayment(p);
-    setPaymentForm({ month: p.month, amount: p.amount, paid_on: p.paid_on ?? "", status: p.status });
+    setPaymentForm({ month: p.month, amount: String(p.amount), paid_on: p.paid_on ?? "", status: p.status });
     setPaymentsError("");
     setShowPaymentModal(true);
   }
@@ -205,7 +205,7 @@ export default function AdminTenantDetailsPage() {
       tenant_id: tenant.id,
       owner_id: tenant.owner_id,
       month: paymentForm.month.trim(),
-      amount: paymentForm.amount,
+      amount: Number(paymentForm.amount) || 0,
       paid_on: paymentForm.paid_on || null,
       status: paymentForm.status,
     };
@@ -1157,7 +1157,7 @@ export default function AdminTenantDetailsPage() {
               </div>
               <div>
                 <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Amount (₹)</label>
-                <input type="number" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: +e.target.value || 0 })}
+                <input type="number" value={paymentForm.amount} onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
                   className="w-full px-3 py-2 text-sm rounded-lg"
                   style={{ border: "1.5px solid rgba(27,79,187,0.25)", color: "#111827", outline: "none" }} />
               </div>
