@@ -43,6 +43,9 @@ function blankCoTenant(): CoTenant {
 }
 
 type SupabaseTenant = {
+  security_deposit: number | null;
+  date_of_joining: string | null;
+  amount_given: number | null;
   owner_id: string;
   id: number;
   name: string;
@@ -66,7 +69,7 @@ type SupabaseTenant = {
 
 const EMPTY_FORM = {
   name: "", building: BUILDINGS[0], flatNo: "", rent: "", phone: "", email: "",
-  age: "", aadhar: "",
+  age: "", aadhar: "", securityDeposit: "", dateOfJoining: "", amountGiven: "",
 };
 
 function maskAadhar(aadhar?: string | null) {
@@ -85,6 +88,7 @@ export default function AdminTenantsPage() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [newTenant, setNewTenant] = useState(EMPTY_FORM);
+  const [newAadharFile, setNewAadharFile] = useState<File | null>(null);
   const [newCoTenants, setNewCoTenants] = useState<CoTenant[]>([]);
   const [addError, setAddError] = useState("");
 
@@ -211,6 +215,7 @@ export default function AdminTenantsPage() {
 
   function openAddModal() {
     setNewTenant(EMPTY_FORM);
+    setNewAadharFile(null);
     setNewCoTenants([]);
     setAddError("");
     setShowAddModal(true);
@@ -243,6 +248,9 @@ export default function AdminTenantsPage() {
         email: newTenant.email,
         age: newTenant.age ? Number(newTenant.age) : null,
         aadhar: newTenant.aadhar.trim() || null,
+        security_deposit: newTenant.securityDeposit ? Number(newTenant.securityDeposit) : null,
+        date_of_joining: newTenant.dateOfJoining || null,
+        amount_given: newTenant.amountGiven ? Number(newTenant.amountGiven) : null,
         status: "occupied",
         risk: "low",
         approved: true,
@@ -254,6 +262,15 @@ export default function AdminTenantsPage() {
     if (error) {
       setAddError(error.message);
       return;
+    }
+
+    if (newAadharFile && inserted) {
+      const fileExt = newAadharFile.name.split(".").pop();
+      const filePath = "tenant-" + inserted.id + "/aadhar-" + Date.now() + "." + fileExt;
+      const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, newAadharFile);
+      if (!uploadError) {
+        await supabase.from("tenants").update({ aadhar_file_path: filePath }).eq("id", inserted.id);
+      }
     }
 
     const validCoTenants = newCoTenants.filter((c) => c.name.trim());
@@ -286,6 +303,9 @@ export default function AdminTenantsPage() {
       name: t.name, building: t.building, flatNo: t.flat_no, rent: String(t.rent),
       phone: t.phone, email: t.email ?? "",
       age: t.age ? String(t.age) : "", aadhar: t.aadhar ?? "",
+      securityDeposit: t.security_deposit ? String(t.security_deposit) : "",
+      dateOfJoining: t.date_of_joining ?? "",
+      amountGiven: t.amount_given ? String(t.amount_given) : "",
     });
     setEditFormStatus(t.paymentStatus ?? "Paid");
     const existing = t.coTenants ? t.coTenants.map((c) => ({ ...c })) : [];
@@ -676,6 +696,37 @@ export default function AdminTenantsPage() {
                   <input type="number" value={newTenant.rent} onChange={(e) => setNewTenant({ ...newTenant, rent: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg"
                     style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Security deposit (₹)</label>
+                  <input type="number" value={newTenant.securityDeposit} onChange={(e) => setNewTenant({ ...newTenant, securityDeposit: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Amount given (₹)</label>
+                  <input type="number" value={newTenant.amountGiven} onChange={(e) => setNewTenant({ ...newTenant, amountGiven: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Date of joining</label>
+                  <input type="date" value={newTenant.dateOfJoining} onChange={(e) => setNewTenant({ ...newTenant, dateOfJoining: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Aadhar document (upload)</label>
+                  <input type="file" onChange={(e) => setNewAadharFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-xs px-3 py-2 rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#6B7280" }} />
+                  {newAadharFile && <p className="text-xs mt-1" style={{ color: "#0F6E56" }}>{newAadharFile.name}</p>}
                 </div>
               </div>
             </div>
