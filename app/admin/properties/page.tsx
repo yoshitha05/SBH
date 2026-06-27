@@ -19,7 +19,7 @@ type SupabaseProperty = {
   monthly_collection: number;
 };
 
-const EMPTY_FORM = { name: "", address: "", totalFlats: 0, monthlyCollection: 0 };
+const EMPTY_FORM = { name: "", address: "", totalFlats: "", monthlyCollection: "" };
 
 export default function PropertiesListPage() {
   const router = useRouter();
@@ -94,8 +94,8 @@ export default function PropertiesListPage() {
     const { error } = await supabase.from("properties").insert({
       name: newBuilding.name.trim(),
       address: newBuilding.address.trim(),
-      total_flats: newBuilding.totalFlats,
-      monthly_collection: newBuilding.monthlyCollection,
+      total_flats: Number(newBuilding.totalFlats) || 0,
+      monthly_collection: Number(newBuilding.monthlyCollection) || 0,
       owner_id: user.id,
     });
 
@@ -288,13 +288,13 @@ export default function PropertiesListPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Total flats</label>
-                  <input type="number" value={newBuilding.totalFlats} onChange={(e) => setNewBuilding({ ...newBuilding, totalFlats: +e.target.value || 0 })}
+                  <input type="number" value={newBuilding.totalFlats} onChange={(e) => setNewBuilding({ ...newBuilding, totalFlats: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg"
                     style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Monthly collection (₹)</label>
-                  <input type="number" value={newBuilding.monthlyCollection} onChange={(e) => setNewBuilding({ ...newBuilding, monthlyCollection: +e.target.value || 0 })}
+                  <input type="number" value={newBuilding.monthlyCollection} onChange={(e) => setNewBuilding({ ...newBuilding, monthlyCollection: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg"
                     style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
                 </div>
