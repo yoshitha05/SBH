@@ -72,7 +72,7 @@ function blankCoTenantProp(): CoTenant {
 }
 
 const EMPTY_NEW_TENANT_FORM = {
-  name: "", flatNo: "", rent: 0, phone: "", email: "", age: "", aadhar: "",
+  name: "", flatNo: "", rent: "", phone: "", email: "", age: "", aadhar: "",
 };
 
 const SAMPLE_HISTORY: HistoryEntry[] = [
@@ -128,7 +128,7 @@ export default function AdminBuildingPage() {
         name: newTenant.name.trim(),
         building: property.name,
         flat_no: newTenant.flatNo.trim(),
-        rent: newTenant.rent,
+        rent: Number(newTenant.rent) || 0,
         phone: newTenant.phone,
         email: newTenant.email,
         age: newTenant.age ? Number(newTenant.age) : null,
@@ -242,7 +242,8 @@ export default function AdminBuildingPage() {
 
   const [editing, setEditing]   = useState(false);
   const [address, setAddress]   = useState("");
-  const [totalFlats, setTotalFlats] = useState(0);
+  const [totalFlats, setTotalFlats] = useState("");
+  const [monthlyCollection, setMonthlyCollection] = useState("");
   const [saved, setSaved]       = useState("");
   const [saveError, setSaveError] = useState("");
 
@@ -250,7 +251,8 @@ export default function AdminBuildingPage() {
   useEffect(() => {
     if (property) {
       setAddress(property.address);
-      setTotalFlats(property.total_flats);
+      setTotalFlats(String(property.total_flats));
+      setMonthlyCollection(String(property.monthly_collection));
     }
   }, [property]);
 
@@ -440,7 +442,7 @@ export default function AdminBuildingPage() {
     setSaveError("");
     const { error } = await supabase
       .from("properties")
-      .update({ address, total_flats: totalFlats })
+      .update({ address, total_flats: Number(totalFlats) || 0, monthly_collection: Number(monthlyCollection) || 0 })
       .eq("id", property!.id);
 
     if (error) {
@@ -450,7 +452,7 @@ export default function AdminBuildingPage() {
 
     // Reflect the change locally so the rest of the page (metric cards,
     // header) updates immediately without a full refetch.
-    setProperty((prev) => prev ? { ...prev, address, total_flats: totalFlats } : prev);
+    setProperty((prev) => prev ? { ...prev, address, total_flats: Number(totalFlats) || 0, monthly_collection: Number(monthlyCollection) || 0 } : prev);
     setSaved(`Saved at ${new Date().toLocaleTimeString()}`);
     setEditing(false);
     setTimeout(() => setSaved(""), 3000);
@@ -766,15 +768,15 @@ export default function AdminBuildingPage() {
             </div>
             <div>
               <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Total flats</label>
-              <input type="number" value={totalFlats} disabled={!editing} onChange={(e) => setTotalFlats(+e.target.value)}
+              <input type="number" value={totalFlats} disabled={!editing} onChange={(e) => setTotalFlats(e.target.value)}
                 className="w-full px-3 py-2 text-sm rounded-lg"
                 style={{ border: "1.5px solid rgba(27,79,187,0.25)", color: "#111827", background: editing ? "#fff" : "#F5F7FB" }} />
             </div>
             <div>
               <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Monthly collection</label>
-              <input value={`₹${property.monthly_collection.toLocaleString("en-IN")}`} disabled
+              <input type="number" value={monthlyCollection} disabled={!editing} onChange={(e) => setMonthlyCollection(e.target.value)}
                 className="w-full px-3 py-2 text-sm rounded-lg"
-                style={{ border: "1.5px solid rgba(27,79,187,0.15)", color: "#9CA3AF", background: "#F5F7FB" }} />
+                style={{ border: "1.5px solid rgba(27,79,187,0.25)", color: "#111827", background: editing ? "#fff" : "#F5F7FB" }} />
             </div>
           </div>
 
@@ -1071,7 +1073,7 @@ export default function AdminBuildingPage() {
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Monthly rent (₹)</label>
-                  <input type="number" value={newTenant.rent} onChange={(e) => setNewTenant({ ...newTenant, rent: +e.target.value || 0 })}
+                  <input type="number" value={newTenant.rent} onChange={(e) => setNewTenant({ ...newTenant, rent: e.target.value })}
                     className="w-full px-3 py-2 text-sm rounded-lg"
                     style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
                 </div>
