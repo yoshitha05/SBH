@@ -2,18 +2,17 @@
 
 // app/admin/page.tsx
 //
-// Converted from static fake data (data/properties.ts, data/tenants.ts,
-// data/collections.ts) to real Supabase queries, scoped by owner_id.
-// This is what was causing every account to see the same hardcoded
-// numbers regardless of who was logged in.
+// KPI cards (Total rent, Collected, Outstanding) are now computed live
+// from the tenants table's rent + payment_status fields, replacing the
+// old payment_history-based numbers — consistent with the per-building
+// "Monthly rent" logic. "Quick actions" card removed.
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import {
   Wallet, TrendingUp, Users, ArrowRight, CheckCircle,
-  AlertTriangle, Brain, CreditCard, Bell, ShieldCheck,
-  FileText, Building2, LogOut, X, Mail, Calendar, Pencil, Save, Loader2,
+  AlertTriangle, Brain, Building2, LogOut, X, Mail, Calendar, Pencil, Save, Loader2,
 } from "lucide-react";
 
 type AdminProfile = {
@@ -29,17 +28,10 @@ type TenantRow = {
   name: string;
   building: string;
   flat_no: string;
+  rent: number;
+  payment_status: string | null;
   approved: boolean;
   access_enabled: boolean;
-  status: string;
-};
-
-type PaymentRow = {
-  id: number;
-  tenant_id: number;
-  month: string;
-  amount: number;
-  paid_on: string | null;
   status: string;
 };
 
@@ -56,7 +48,6 @@ export default function AdminDashboard() {
   const [buildingCount, setBuildingCount] = useState(0);
   const [totalFlats, setTotalFlats] = useState(0);
   const [tenants, setTenants] = useState<TenantRow[]>([]);
-  const [payments, setPayments] = useState<PaymentRow[]>([]);
 
   async function loadDashboardData() {
     setLoading(true);
@@ -100,7 +91,7 @@ export default function AdminDashboard() {
 
     const { data: tenantData, error: tenError } = await supabase
       .from("tenants")
-      .select("id, name, building, flat_no, approved, access_enabled, status")
+      .select("id, name, building, flat_no, rent, payment_status, approved, access_enabled, status")
       .eq("owner_id", user.id);
 
     if (tenError) {
@@ -109,19 +100,6 @@ export default function AdminDashboard() {
       return;
     }
     setTenants(tenantData ?? []);
-
-    const { data: paymentData, error: payError } = await supabase
-      .from("payment_history")
-      .select("id, tenant_id, month, amount, paid_on, status")
-      .eq("owner_id", user.id)
-      .order("paid_on", { ascending: false });
-
-    if (payError) {
-      setLoadError(payError.message);
-      setLoading(false);
-      return;
-    }
-    setPayments(paymentData ?? []);
 
     setLoading(false);
   }
@@ -192,50 +170,24 @@ export default function AdminDashboard() {
     );
   }
 
-  // Derive everything from real data, scoped to whoever's logged in.
-  const tenantMap = new Map(tenants.map((t) => [t.id, t]));
-  const currentMonth = [...new Set(payments.map((p) => p.month))][0] ?? null;
-  const thisMonthPayments = currentMonth ? payments.filter((p) => p.month === currentMonth) : [];
-
-  const totalRent = thisMonthPayments.reduce((s, p) => s + p.amount, 0);
-  const collected = thisMonthPayments.filter((p) => p.status === "Paid").reduce((s, p) => s + p.amount, 0);
-  const outstanding = thisMonthPayments.filter((p) => p.status !== "Paid").reduce((s, p) => s + p.amount, 0);
-  const overdueCount = thisMonthPayments.filter((p) => p.status === "Late").length;
+  // ── KPIs now computed live from the tenants table itself ──
+  const totalRent = tenants.reduce((s, t) => s + (t.rent || 0), 0);
+  const collected = tenants.filter((t) => t.payment_status === "Paid").reduce((s, t) => s + (t.rent || 0), 0);
+  const outstanding = tenants.filter((t) => t.payment_status !== "Paid").reduce((s, t) => s + (t.rent || 0), 0);
+  const overdueCount = tenants.filter((t) => t.payment_status === "Overdue").length;
   const collectionPct = totalRent > 0 ? Math.round((collected / totalRent) * 100) : 0;
 
   const activeTenants = tenants.filter((t) => t.approved && t.access_enabled);
   const pendingTenants = tenants.filter((t) => !t.approved);
-  const overdueTenantNames = thisMonthPayments
-    .filter((p) => p.status === "Late")
-    .map((p) => tenantMap.get(p.tenant_id))
-    .filter(Boolean);
+  const overdueTenants = tenants.filter((t) => t.payment_status === "Overdue");
 
-  const recentActivity = [
-    ...payments.filter((p) => p.paid_on)
-      .sort((a, b) => (b.paid_on ?? "").localeCompare(a.paid_on ?? ""))
-      .slice(0, 4)
-      .map((p) => {
-        const t = tenantMap.get(p.tenant_id);
-        return {
-          type: "payment" as const,
-          label: `${t?.name ?? "Unknown"} paid ₹${p.amount.toLocaleString("en-IN")}`,
-          sub: `${t?.building ?? "—"} · Flat ${t?.flat_no ?? "—"} · ${p.paid_on}`,
-          color: "#1D9E75",
-        };
-      }),
-    ...overdueTenantNames.slice(0, 2).map((t: any) => ({
-      type: "alert" as const,
-      label: `${t.name} — rent overdue`,
-      sub: `${t.building} · Flat ${t.flat_no}`,
-      color: "#E24B4A",
-    })),
-  ].slice(0, 5);
+  const currentMonthLabel = new Date().toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
-  const firstOverdue = overdueTenantNames[0] as TenantRow | undefined;
+  const firstOverdue = overdueTenants[0];
   const aiRecs = [
     {
       title: firstOverdue ? `Send final notice to ${firstOverdue.name}` : "No overdue tenants this month",
-      desc: firstOverdue ? `${firstOverdue.building} · Flat ${firstOverdue.flat_no} — marked Late this month.` : "Everything is on track.",
+      desc: firstOverdue ? `${firstOverdue.building} · Flat ${firstOverdue.flat_no} — marked Overdue.` : "Everything is on track.",
       action: "/admin/reminders", actionLabel: "Send reminder", bg: "#FCEBEB", border: "#F7C1C1", titleColor: "#791F1F",
     },
     {
@@ -253,12 +205,11 @@ export default function AdminDashboard() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
 
-      {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: "#18233c" }}>Admin Dashboard</h1>
           <p className="text-sm mt-0.5" style={{ color: "#6B7280" }}>
-            {currentMonth ?? "No payments yet"} · {buildingCount} building{buildingCount !== 1 ? "s" : ""} · {activeTenants.length} of {totalFlats} flats occupied
+            {currentMonthLabel} · {buildingCount} building{buildingCount !== 1 ? "s" : ""} · {activeTenants.length} of {totalFlats} flats occupied
           </p>
         </div>
         <button onClick={() => setShowProfile(true)}
@@ -268,7 +219,6 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* Profile modal */}
       {showProfile && (
         <div className="fixed inset-0 z-50 flex items-start justify-end p-4"
           style={{ background: "rgba(0,0,0,0.3)" }} onClick={() => { setShowProfile(false); setEditing(false); }}>
@@ -357,12 +307,11 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.88)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><Wallet size={13} /> Total rent</div>
           <div className="text-2xl font-semibold" style={{ color: "#111827" }}>₹{(totalRent/100000).toFixed(1)}L</div>
-          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{currentMonth ?? "—"} · {buildingCount} buildings</div>
+          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{currentMonthLabel} · {buildingCount} buildings</div>
         </div>
         <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.88)", border: "2px solid #d6b06d" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><TrendingUp size={13} /> Collected</div>
@@ -372,7 +321,7 @@ export default function AdminDashboard() {
         <div className="rounded-lg p-4" style={{ background: "#fbeee2", border: "1.5px solid #e5c8a4" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><AlertTriangle size={13} /> Outstanding</div>
           <div className="text-2xl font-semibold" style={{ color: "#A32D2D" }}>₹{(outstanding/100000).toFixed(1)}L</div>
-          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{overdueCount} payments overdue</div>
+          <div className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{overdueCount} tenants overdue</div>
         </div>
         <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.88)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><Users size={13} /> Tenants</div>
@@ -381,10 +330,9 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Rent status progress */}
       <div className="rounded-xl p-4 mb-6" style={{ background: "rgba(255,255,255,0.92)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-medium" style={{ color: "#111827" }}>{currentMonth ?? "This month"} rent status</span>
+          <span className="text-sm font-medium" style={{ color: "#111827" }}>{currentMonthLabel} rent status</span>
           <span className="text-sm font-semibold" style={{ color: "#0F6E56" }}>{collectionPct}% collected</span>
         </div>
         <div className="h-2.5 rounded-full mb-2" style={{ background: "#E5E7EB" }}>
@@ -397,7 +345,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* AI + Active tenants */}
       <div className="grid lg:grid-cols-3 gap-5 mb-5">
         <div className="lg:col-span-2 rounded-xl p-5" style={{ background: "rgba(255,255,255,0.92)", border: "2px solid #d6b06d" }}>
           <div className="flex items-center gap-2 mb-4">
@@ -450,48 +397,25 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Recent activity + Quick actions */}
-      <div className="grid lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 rounded-xl p-5" style={{ background: "rgba(255,255,255,0.92)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold" style={{ color: "#111827" }}>Recent activity</h2>
-            <Link href="/admin/payments" className="text-xs font-medium" style={{ color: "#b8924c" }}>All transactions →</Link>
-          </div>
-          {recentActivity.length === 0 ? (
-            <p className="text-xs text-center py-6" style={{ color: "#9CA3AF" }}>No activity yet</p>
-          ) : recentActivity.map((a, i) => (
-            <div key={i} className="flex items-start gap-3 py-2.5"
-              style={{ borderBottom: i < recentActivity.length-1 ? "1px solid rgba(27,79,187,0.07)" : "none" }}>
-              <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: a.color+"18" }}>
-                {a.type==="payment" ? <CheckCircle size={12} style={{ color: a.color }} /> : <AlertTriangle size={12} style={{ color: a.color }} />}
-              </div>
-              <div>
-                <p className="text-xs font-medium" style={{ color: "#111827" }}>{a.label}</p>
-                <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{a.sub}</p>
-              </div>
+      <div className="rounded-xl p-5" style={{ background: "rgba(255,255,255,0.92)", border: "1.5px solid rgba(35,47,79,0.14)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold" style={{ color: "#111827" }}>Recent activity</h2>
+          <Link href="/admin/payments" className="text-xs font-medium" style={{ color: "#b8924c" }}>All transactions →</Link>
+        </div>
+        {overdueTenants.length === 0 ? (
+          <p className="text-xs text-center py-6" style={{ color: "#9CA3AF" }}>No overdue tenants right now</p>
+        ) : overdueTenants.map((t, i) => (
+          <div key={t.id} className="flex items-start gap-3 py-2.5"
+            style={{ borderBottom: i < overdueTenants.length-1 ? "1px solid rgba(27,79,187,0.07)" : "none" }}>
+            <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5" style={{ background: "#E24B4A18" }}>
+              <AlertTriangle size={12} style={{ color: "#E24B4A" }} />
             </div>
-          ))}
-        </div>
-
-        <div className="rounded-xl p-5" style={{ background: "rgba(255,255,255,0.92)", border: "2px solid #d6b06d" }}>
-          <h2 className="text-sm font-semibold mb-4" style={{ color: "#111827" }}>Quick actions</h2>
-          <div className="space-y-2">
-            {[
-              { label: "Properties",     href: "/admin/properties",  icon: Building2,   bg: "#E8F0FE", text: "#1B4FBB" },
-              { label: "All tenants",    href: "/admin/tenants",     icon: Users,       bg: "#E1F5EE", text: "#085041" },
-              { label: "Review approvals",href:"/admin/approvals",   icon: ShieldCheck, bg: "#FAEEDA", text: "#633806" },
-              { label: "Payments",       href: "/admin/payments",    icon: CreditCard,  bg: "#E6F1FB", text: "#0C447C" },
-              { label: "Expenditure",    href: "/admin/expenditure", icon: FileText,    bg: "#EEEDFE", text: "#26215C" },
-              { label: "Reminders",      href: "/admin/reminders",   icon: Bell,        bg: "#FCEBEB", text: "#791F1F" },
-            ].map(({ label, href, icon: Icon, bg, text }) => (
-              <Link key={label} href={href} className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium group"
-                style={{ background: bg, color: text, textDecoration: "none" }}>
-                <Icon size={13} /><span className="flex-1">{label}</span>
-                <ArrowRight size={11} className="opacity-0 group-hover:opacity-100 transition" />
-              </Link>
-            ))}
+            <div>
+              <p className="text-xs font-medium" style={{ color: "#111827" }}>{t.name} — rent overdue</p>
+              <p className="text-xs mt-0.5" style={{ color: "#9CA3AF" }}>{t.building} · Flat {t.flat_no} · ₹{t.rent.toLocaleString("en-IN")}</p>
+            </div>
           </div>
-        </div>
+        ))}
       </div>
     </div>
   );

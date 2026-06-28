@@ -2,12 +2,11 @@
 
 // app/admin/properties/[id]/page.tsx
 //
-// STAGE 1 of Supabase migration: the PROPERTY itself now loads from
-// Supabase (the `properties` table) instead of the static data/properties.ts
-// file. Tenants, notes, and expenditure are still local/static for now —
-// those get migrated in later stages.
+// Tenant table on this page: removed the "Access" column, and made
+// Rent, Amount given, and Payment status directly editable inline,
+// each saving to Supabase as soon as it's changed.
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, memo } from "react";
 import { useParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
@@ -28,13 +27,11 @@ const statusStyles: Record<string, { bg: string; text: string; border: string }>
   pending: { bg: "#E6F1FB", text: "#0C447C", border: "#B5D4F4" },
 };
 
+const PAYMENT_STATUS_OPTIONS = ["Paid", "Partially paid", "Pending", "Overdue"];
+
 type ExpRow = { id: string; date: string; item: string; amount: number };
 type HistoryEntry = { flatNo: string; tenantName: string; from: string; to: string; rent: number };
 
-// Shape of a row coming back from the Supabase `properties` table.
-// Column names are snake_case in Postgres; we map them to the same
-// camelCase shape the rest of this page already expects, so nothing
-// else below has to change.
 type SupabaseProperty = {
   id: number;
   name: string;
@@ -43,9 +40,6 @@ type SupabaseProperty = {
   monthly_collection: number;
 };
 
-// Shape of a row coming back from the Supabase `tenants` table, used for
-// this building's "Flats & tenant details" list. Co-tenants aren't joined
-// in yet (see note further down), so occupant count is always 1 for now.
 type SupabaseTenant = {
   id: number;
   name: string;
@@ -54,25 +48,35 @@ type SupabaseTenant = {
   building: string;
   flat_no: string;
   rent: number;
+  amount_given: number | null;
+  payment_status: string | null;
   status: string;
   approved: boolean;
   access_enabled: boolean;
 };
 
-// Co-tenant shape for the Add Tenant modal on this page (mirrors the
-// Tenants list page's Add modal exactly).
 type CoTenant = {
   id: number | string;
   name: string; age: string; phone: string; email: string; aadhar: string;
+  aadharFile?: File | null;
   isNew?: boolean;
 };
 let _newCoIdProp = 1;
 function blankCoTenantProp(): CoTenant {
-  return { id: `new${_newCoIdProp++}`, name: "", age: "", phone: "", email: "", aadhar: "", isNew: true };
+  return { id: `new${_newCoIdProp++}`, name: "", age: "", phone: "", email: "", aadhar: "", aadharFile: null, isNew: true };
 }
 
 const EMPTY_NEW_TENANT_FORM = {
-  name: "", flatNo: "", rent: "", phone: "", email: "", age: "", aadhar: "",
+  name: "",
+  flatNo: "",
+  rent: "",
+  phone: "",
+  email: "",
+  age: "",
+  aadhar: "",
+  securityDeposit: "",
+  joiningDate: "",
+  amountGiven: "",
 };
 
 const SAMPLE_HISTORY: HistoryEntry[] = [
@@ -83,24 +87,105 @@ const SAMPLE_HISTORY: HistoryEntry[] = [
   { flatNo: "201", tenantName: "Sanjay Gupta", from: "Jun 2024", to: "Present", rent: 19000 },
 ];
 
+const CoTenantCardProp = memo(function CoTenantCardProp({ co, onUpdate, onUpdateFile, onRemove }: {
+  co: CoTenant;
+  onUpdate: (f: keyof Omit<CoTenant, "id" | "isNew" | "aadharFile">, v: string) => void;
+  onUpdateFile: (file: File | null) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-lg p-3 mb-2" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB" }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium" style={{ color: "#6B7280" }}>Additional tenant</span>
+        <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF" }}>
+          <X size={14} />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        <div className="col-span-2">
+          <input value={co.name} onChange={(e) => onUpdate("name", e.target.value)}
+            placeholder="Full name" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        </div>
+        <div>
+          <input type="number" value={co.age} onChange={(e) => onUpdate("age", e.target.value)}
+            placeholder="Age" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <input value={co.phone} onChange={(e) => onUpdate("phone", e.target.value)}
+          placeholder="Phone" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        <input value={co.email} onChange={(e) => onUpdate("email", e.target.value)}
+          placeholder="Email" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <input value={co.aadhar} onChange={(e) => onUpdate("aadhar", e.target.value)}
+          placeholder="Aadhar number" className="w-full px-2.5 py-1.5 text-xs rounded-lg font-mono"
+          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        <div>
+          <input type="file" onChange={(e) => onUpdateFile(e.target.files?.[0] ?? null)}
+            className="w-full text-xs px-2.5 py-1.5 rounded-lg"
+            style={{ border: "1px solid #E5E7EB", color: "#6B7280" }} />
+          {co.aadharFile && <p className="text-xs mt-1 truncate" style={{ color: "#0F6E56" }}>{co.aadharFile.name}</p>}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function AdminBuildingPage() {
   const params = useParams();
   const id = params.id as string;
 
-  // ── Property now comes from Supabase, not data/properties.ts ──
   const [property, setProperty] = useState<SupabaseProperty | null>(null);
   const [buildingTenants, setBuildingTenants] = useState<SupabaseTenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  // ── Add tenant modal (pre-filled with this building) ──
+  // ── Inline tenant row editing (rent, amount given, payment status) ──
+  const [tenantEdits, setTenantEdits] = useState<Record<number, { rent: string; amountGiven: string }>>({});
+
+  function getTenantEditValue(tenant: SupabaseTenant, field: "rent" | "amountGiven") {
+    const edit = tenantEdits[tenant.id];
+    if (edit) return edit[field];
+    return field === "rent" ? String(tenant.rent) : String(tenant.amount_given ?? "");
+  }
+  function setTenantEditValue(tenantId: number, field: "rent" | "amountGiven", val: string) {
+    setTenantEdits((prev) => ({
+      ...prev,
+      [tenantId]: {
+        rent: prev[tenantId]?.rent ?? "",
+        amountGiven: prev[tenantId]?.amountGiven ?? "",
+        [field]: val,
+      },
+    }));
+  }
+  async function commitTenantField(tenant: SupabaseTenant, field: "rent" | "amount_given", val: string) {
+    const numVal = Number(val) || 0;
+    const { error } = await supabase.from("tenants").update({ [field]: numVal }).eq("id", tenant.id);
+    if (!error) {
+      setBuildingTenants((prev) => prev.map((t) => t.id === tenant.id ? { ...t, [field]: numVal } : t));
+    }
+  }
+  async function updateTenantPaymentStatus(tenant: SupabaseTenant, newStatus: string) {
+    const { error } = await supabase.from("tenants").update({ payment_status: newStatus }).eq("id", tenant.id);
+    if (!error) {
+      setBuildingTenants((prev) => prev.map((t) => t.id === tenant.id ? { ...t, payment_status: newStatus } : t));
+    }
+  }
+
   const [showAddTenantModal, setShowAddTenantModal] = useState(false);
   const [newTenant, setNewTenant] = useState(EMPTY_NEW_TENANT_FORM);
+  const [newAadharFile, setNewAadharFile] = useState<File | null>(null);
   const [newCoTenants, setNewCoTenants] = useState<CoTenant[]>([]);
   const [addTenantError, setAddTenantError] = useState("");
 
   function openAddTenantModal() {
     setNewTenant(EMPTY_NEW_TENANT_FORM);
+    setNewAadharFile(null);
     setNewCoTenants([]);
     setAddTenantError("");
     setShowAddTenantModal(true);
@@ -108,12 +193,15 @@ export default function AdminBuildingPage() {
   function addNewCoTenant() {
     setNewCoTenants((prev) => [...prev, blankCoTenantProp()]);
   }
-  function updateNewCoTenant(id: number | string, field: keyof Omit<CoTenant, "id" | "isNew">, val: string) {
+  const updateNewCoTenant = useCallback((id: number | string, field: keyof Omit<CoTenant, "id" | "isNew" | "aadharFile">, val: string) => {
     setNewCoTenants((prev) => prev.map((c) => c.id === id ? { ...c, [field]: val } : c));
-  }
-  function removeNewCoTenant(id: number | string) {
+  }, []);
+  const updateNewCoTenantFile = useCallback((id: number | string, file: File | null) => {
+    setNewCoTenants((prev) => prev.map((c) => c.id === id ? { ...c, aadharFile: file } : c));
+  }, []);
+  const removeNewCoTenant = useCallback((id: number | string) => {
     setNewCoTenants((prev) => prev.filter((c) => c.id !== id));
-  }
+  }, []);
   async function submitNewTenant() {
     if (!property) return;
     if (!newTenant.name.trim() || !newTenant.flatNo.trim()) {
@@ -122,9 +210,13 @@ export default function AdminBuildingPage() {
     }
     setAddTenantError("");
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setAddTenantError("Not signed in."); return; }
+
     const { data: inserted, error } = await supabase
       .from("tenants")
       .insert({
+        owner_id: user.id,
         name: newTenant.name.trim(),
         building: property.name,
         flat_no: newTenant.flatNo.trim(),
@@ -133,6 +225,10 @@ export default function AdminBuildingPage() {
         email: newTenant.email,
         age: newTenant.age ? Number(newTenant.age) : null,
         aadhar: newTenant.aadhar.trim() || null,
+        security_deposit: newTenant.securityDeposit ? Number(newTenant.securityDeposit) : null,
+        date_of_joining: newTenant.joiningDate || null,
+        amount_given: newTenant.amountGiven ? Number(newTenant.amountGiven) : null,
+        payment_status: "Pending",
         status: "occupied",
         risk: "low",
         approved: true,
@@ -146,72 +242,55 @@ export default function AdminBuildingPage() {
       return;
     }
 
+    if (newAadharFile && inserted) {
+      const fileExt = newAadharFile.name.split(".").pop();
+      const filePath = "tenant-" + inserted.id + "/aadhar-" + Date.now() + "." + fileExt;
+      const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, newAadharFile);
+      if (!uploadError) {
+        await supabase.from("tenants").update({ aadhar_file_path: filePath }).eq("id", inserted.id);
+      }
+    }
+
     const validCoTenants = newCoTenants.filter((c) => c.name.trim());
     if (validCoTenants.length > 0 && inserted) {
-      const { error: coError } = await supabase.from("co_tenants").insert(
+      const { data: insertedCoTenants, error: coError } = await supabase.from("co_tenants").insert(
         validCoTenants.map((c) => ({
           tenant_id: inserted.id,
+          owner_id: user.id,
           name: c.name,
           age: c.age ? Number(c.age) : null,
           phone: c.phone,
           email: c.email,
           aadhar: c.aadhar.trim() || null,
         }))
-      );
+      ).select();
+
       if (coError) {
         setAddTenantError(`Tenant added, but co-tenants failed to save: ${coError.message}`);
+      } else if (insertedCoTenants) {
+        for (let i = 0; i < validCoTenants.length; i++) {
+          const file = validCoTenants[i].aadharFile;
+          const coRow = insertedCoTenants[i];
+          if (file && coRow) {
+            const fileExt = file.name.split(".").pop();
+            const filePath = "co-tenant-" + coRow.id + "/aadhar-" + Date.now() + "." + fileExt;
+            const { error: coUploadError } = await supabase.storage.from("documents").upload(filePath, file);
+            if (!coUploadError) {
+              await supabase.from("co_tenants").update({ aadhar_file_path: filePath }).eq("id", coRow.id);
+            }
+          }
+        }
       }
     }
 
     setShowAddTenantModal(false);
-    // Refetch this building's tenants so the new one shows immediately
     const { data: freshTenants } = await supabase
       .from("tenants")
       .select("*")
       .eq("building", property.name)
+      .eq("owner_id", user.id)
       .order("flat_no", { ascending: true });
     if (freshTenants) setBuildingTenants(freshTenants);
-  }
-
-  // Shared co-tenant card UI for the Add Tenant modal on this page
-  function CoTenantCardProp({ co, onUpdate, onRemove }: {
-    co: CoTenant;
-    onUpdate: (f: keyof Omit<CoTenant, "id" | "isNew">, v: string) => void;
-    onRemove: () => void;
-  }) {
-    return (
-      <div className="rounded-lg p-3 mb-2" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB" }}>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium" style={{ color: "#6B7280" }}>Additional tenant</span>
-          <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF" }}>
-            <X size={14} />
-          </button>
-        </div>
-        <div className="grid grid-cols-3 gap-2 mb-2">
-          <div className="col-span-2">
-            <input value={co.name} onChange={(e) => onUpdate("name", e.target.value)}
-              placeholder="Full name" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-              style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-          </div>
-          <div>
-            <input type="number" value={co.age} onChange={(e) => onUpdate("age", e.target.value)}
-              placeholder="Age" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-              style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          <input value={co.phone} onChange={(e) => onUpdate("phone", e.target.value)}
-            placeholder="Phone" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-          <input value={co.email} onChange={(e) => onUpdate("email", e.target.value)}
-            placeholder="Email" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-        </div>
-        <input value={co.aadhar} onChange={(e) => onUpdate("aadhar", e.target.value)}
-          placeholder="Aadhar number" className="w-full px-2.5 py-1.5 text-xs rounded-lg font-mono"
-          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-      </div>
-    );
   }
 
   useEffect(() => {
@@ -219,9 +298,6 @@ export default function AdminBuildingPage() {
       setLoading(true);
       setLoadError("");
 
-      // The URL param is the building name (e.g. "ohm"), matching the
-      // old behaviour where /admin/properties/ohm looked up by name.
-      // We match case-insensitively against the `name` column.
       const { data, error } = await supabase
         .from("properties")
         .select("*")
@@ -243,20 +319,16 @@ export default function AdminBuildingPage() {
   const [editing, setEditing]   = useState(false);
   const [address, setAddress]   = useState("");
   const [totalFlats, setTotalFlats] = useState("");
-  const [monthlyCollection, setMonthlyCollection] = useState("");
   const [saved, setSaved]       = useState("");
   const [saveError, setSaveError] = useState("");
 
-  // Keep the edit form in sync once the property finishes loading
   useEffect(() => {
     if (property) {
       setAddress(property.address);
       setTotalFlats(String(property.total_flats));
-      setMonthlyCollection(String(property.monthly_collection));
     }
   }, [property]);
 
-  // Fetch this building's tenants from Supabase once we know the building name
   useEffect(() => {
     async function loadBuildingTenants() {
       if (!property) return;
@@ -273,8 +345,6 @@ export default function AdminBuildingPage() {
     loadBuildingTenants();
   }, [property]);
 
-  // Notes are now a real list of dated entries per building, stored in
-  // the `notes` table — not one big local textarea.
   type NoteEntry = { id: number; content: string; created_at: string };
   const [notesList, setNotesList] = useState<NoteEntry[]>([]);
   const [notesError, setNotesError] = useState("");
@@ -316,7 +386,6 @@ export default function AdminBuildingPage() {
     setNewNoteText("");
   }
 
-  // Edit an existing note in place
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
   const [editNoteText, setEditNoteText] = useState("");
 
@@ -359,7 +428,6 @@ export default function AdminBuildingPage() {
     setNotesList((prev) => prev.filter((n) => n.id !== note.id));
   }
 
-  // Expenditure now loads from and saves to the real `expenditure` table
   const [expRows, setExpRows] = useState<ExpRow[]>([]);
   const [expError, setExpError] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -382,15 +450,8 @@ export default function AdminBuildingPage() {
     loadExpenditure();
   }, [property]);
 
-  // expTotal must be computed here, alongside the other hooks, BEFORE any
-  // early returns below — React requires the same hooks to run in the same
-  // order on every render, and the loading/error/not-found returns below
-  // would otherwise skip this hook on the first render but not subsequent
-  // ones, which is exactly what caused "Rendered more hooks than during
-  // the previous render."
   const expTotal = useMemo(() => expRows.reduce((s, r) => s + r.amount, 0), [expRows]);
 
-  // ── Loading state ──
   if (loading) {
     return (
       <div className="p-10 text-center" style={{ color: "#9CA3AF" }}>
@@ -400,8 +461,6 @@ export default function AdminBuildingPage() {
     );
   }
 
-  // ── Error state — distinct from "not found", since this is a real
-  // connection/query problem worth surfacing clearly ──
   if (loadError) {
     return (
       <div className="p-10 text-center" style={{ color: "#A32D2D" }}>
@@ -415,7 +474,6 @@ export default function AdminBuildingPage() {
     );
   }
 
-  // ── Not found ──
   if (!property) {
     return (
       <div className="p-10 text-center" style={{ color: "#9CA3AF" }}>
@@ -428,21 +486,17 @@ export default function AdminBuildingPage() {
     );
   }
 
-  // buildingTenants now comes from Supabase (fetched in the useEffect
-  // above). Co-tenant counts and "Overdue" payment status aren't wired
-  // into the tenants table yet, so occupied/overdue use what IS real
-  // (status, approved) and approximate the rest for this stage.
   const occupied = buildingTenants.filter((t) => t.status === "occupied").length;
-  const overdue  = 0; // payment status isn't in the tenants table yet — see payment_history migration
+  const overdue  = buildingTenants.filter((t) => t.payment_status === "Overdue").length;
   const vacant   = Math.max(property.total_flats - occupied, 0);
+  const liveMonthlyRent = buildingTenants.reduce((sum, t) => sum + (t.rent || 0), 0);
   const buildingHistory = SAMPLE_HISTORY;
 
-  // ── Save building info — now writes back to Supabase ──
   async function saveInfo() {
     setSaveError("");
     const { error } = await supabase
       .from("properties")
-      .update({ address, total_flats: Number(totalFlats) || 0, monthly_collection: Number(monthlyCollection) || 0 })
+      .update({ address, total_flats: Number(totalFlats) || 0, monthly_collection: liveMonthlyRent })
       .eq("id", property!.id);
 
     if (error) {
@@ -450,9 +504,7 @@ export default function AdminBuildingPage() {
       return;
     }
 
-    // Reflect the change locally so the rest of the page (metric cards,
-    // header) updates immediately without a full refetch.
-    setProperty((prev) => prev ? { ...prev, address, total_flats: Number(totalFlats) || 0, monthly_collection: Number(monthlyCollection) || 0 } : prev);
+    setProperty((prev) => prev ? { ...prev, address, total_flats: Number(totalFlats) || 0, monthly_collection: liveMonthlyRent } : prev);
     setSaved(`Saved at ${new Date().toLocaleTimeString()}`);
     setEditing(false);
     setTimeout(() => setSaved(""), 3000);
@@ -474,9 +526,7 @@ export default function AdminBuildingPage() {
     setExpRows((prev) => [{ id: String(data.id), date: data.date, item: data.item ?? "", amount: data.amount }, ...prev]);
   }
   async function updateExpRow(rid: string, field: keyof ExpRow, val: string | number) {
-    // Update local state immediately so typing feels responsive...
     setExpRows((prev) => prev.map((r) => r.id === rid ? { ...r, [field]: val } : r));
-    // ...then persist that single field to Supabase.
     const { error } = await supabase
       .from("expenditure")
       .update({ [field]: val })
@@ -540,7 +590,6 @@ export default function AdminBuildingPage() {
   return (
     <div className="p-6 max-w-5xl mx-auto">
 
-      {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm mb-5" style={{ color: "#6B7280" }}>
         <Link href="/admin/properties" className="flex items-center gap-1 hover:underline" style={{ color: "#1B4FBB" }}>
           <ArrowLeft size={13} /> Properties
@@ -549,7 +598,6 @@ export default function AdminBuildingPage() {
         <span>{property.name}</span>
       </div>
 
-      {/* Header */}
       <div className="flex items-start justify-between mb-5">
         <div>
           <h1 className="text-2xl font-semibold" style={{ color: "#111827" }}>{property.name}</h1>
@@ -560,7 +608,6 @@ export default function AdminBuildingPage() {
         </span>
       </div>
 
-      {/* Metric cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <div className="rounded-lg p-3" style={{ background: "#F5F7FB", border: "1.5px solid rgba(27,79,187,0.18)" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><Home size={13} /> Total flats</div>
@@ -576,7 +623,7 @@ export default function AdminBuildingPage() {
         </div>
         <div className="rounded-lg p-3" style={{ background: "#F5F7FB", border: "2px solid #F0C040" }}>
           <div className="flex items-center gap-1.5 text-xs mb-1" style={{ color: "#6B7280" }}><TrendingUp size={13} /> Monthly rent</div>
-          <div className="text-xl font-semibold" style={{ color: "#0F6E56" }}>₹{property.monthly_collection.toLocaleString("en-IN")}</div>
+          <div className="text-xl font-semibold" style={{ color: "#0F6E56" }}>₹{liveMonthlyRent.toLocaleString("en-IN")}</div>
         </div>
       </div>
 
@@ -587,7 +634,6 @@ export default function AdminBuildingPage() {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex gap-0 mb-5 overflow-x-auto" style={{ borderBottomWidth: 1, borderBottomStyle: "solid", borderBottomColor: "rgba(27,79,187,0.12)" }}>
         {([
           { id: "overview",    label: "Overview",    icon: Users },
@@ -612,7 +658,6 @@ export default function AdminBuildingPage() {
         ))}
       </div>
 
-      {/* ── OVERVIEW TAB ── */}
       {tab === "overview" && (
         <>
           <div className="rounded-xl overflow-hidden mb-5" style={{ border: "1.5px solid rgba(27,79,187,0.18)" }}>
@@ -634,26 +679,23 @@ export default function AdminBuildingPage() {
             </div>
 
             <div className="grid text-xs font-semibold uppercase tracking-wide px-4 py-2"
-              style={{ gridTemplateColumns: "1.4fr 0.5fr 0.9fr 0.6fr 0.8fr 0.8fr 0.8fr", background: "#FAFBFF", color: "#6B7280", borderBottom: "1px solid rgba(27,79,187,0.08)" }}>
-              <div>Tenant</div><div>Flat</div><div>Rent</div><div>Occ.</div><div>Status</div><div>Approval</div><div>Access</div>
+              style={{ gridTemplateColumns: "1.2fr 0.5fr 0.9fr 0.9fr 1.1fr 0.7fr", background: "#FAFBFF", color: "#6B7280", borderBottom: "1px solid rgba(27,79,187,0.08)" }}>
+              <div>Tenant</div><div>Flat</div><div>Rent (₹)</div><div>Amount given (₹)</div><div>Payment status</div><div>Approval</div>
             </div>
 
             {buildingTenants.length > 0 ? (
               buildingTenants.map((tenant, i) => {
-                // Payment status isn't in the tenants table yet (coming
-                // with payment_history migration) — approximate using
-                // status for now so the column isn't blank.
-                const approxPaymentStatus = tenant.status === "occupied" ? "Paid" : "Pending approval";
+                const currentStatus = tenant.payment_status ?? "Pending";
                 const ss = statusStyles[
-                  approxPaymentStatus.toLowerCase() === "paid" ? "paid" : "pending"
+                  currentStatus === "Paid" ? "paid"
+                  : currentStatus === "Overdue" ? "overdue"
+                  : currentStatus === "Partially paid" ? "partial"
+                  : "pending"
                 ] ?? statusStyles.pending;
-                // Co-tenants aren't joined in yet — occupant count is
-                // always 1 for this stage.
-                const occupants = 1;
 
                 return (
-                  <div key={tenant.id} className="grid px-4 py-3 items-center text-sm hover:bg-blue-50 transition"
-                    style={{ gridTemplateColumns: "1.4fr 0.5fr 0.9fr 0.6fr 0.8fr 0.8fr 0.8fr", borderTop: i===0?"none":"1px solid rgba(27,79,187,0.07)", background: "#fff" }}>
+                  <div key={tenant.id} className="grid px-4 py-3 items-center text-sm"
+                    style={{ gridTemplateColumns: "1.2fr 0.5fr 0.9fr 0.9fr 1.1fr 0.7fr", borderTop: i===0?"none":"1px solid rgba(27,79,187,0.07)", background: "#fff" }}>
                     <div>
                       <Link href={`/admin/tenant/${tenant.id}`} className="text-xs font-semibold hover:underline" style={{ color: "#1B4FBB" }}>
                         {tenant.name}
@@ -665,25 +707,37 @@ export default function AdminBuildingPage() {
                       </div>
                     </div>
                     <div className="text-xs font-medium" style={{ color: "#111827" }}>{tenant.flat_no}</div>
-                    <div className="text-xs font-semibold" style={{ color: "#111827" }}>₹{tenant.rent.toLocaleString("en-IN")}/mo</div>
-                    <div className="text-xs" style={{ color: "#6B7280" }}>
-                      {occupants}
+                    <div>
+                      <input
+                        type="number"
+                        value={getTenantEditValue(tenant, "rent")}
+                        onChange={(e) => setTenantEditValue(tenant.id, "rent", e.target.value)}
+                        onBlur={(e) => commitTenantField(tenant, "rent", e.target.value)}
+                        className="w-full text-xs px-2 py-1 rounded"
+                        style={{ border: "1px solid #E5E7EB", color: "#111827", background: "#F9FAFB" }} />
                     </div>
                     <div>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: ss.bg, color: ss.text, border: `1px solid ${ss.border}` }}>
-                        {approxPaymentStatus}
-                      </span>
+                      <input
+                        type="number"
+                        value={getTenantEditValue(tenant, "amountGiven")}
+                        onChange={(e) => setTenantEditValue(tenant.id, "amountGiven", e.target.value)}
+                        onBlur={(e) => commitTenantField(tenant, "amount_given", e.target.value)}
+                        className="w-full text-xs px-2 py-1 rounded"
+                        style={{ border: "1px solid #E5E7EB", color: "#111827", background: "#F9FAFB" }} />
+                    </div>
+                    <div>
+                      <select
+                        value={currentStatus}
+                        onChange={(e) => updateTenantPaymentStatus(tenant, e.target.value)}
+                        className="text-xs px-2 py-1 rounded-full font-medium"
+                        style={{ background: ss.bg, color: ss.text, border: `1px solid ${ss.border}`, cursor: "pointer" }}>
+                        {PAYMENT_STATUS_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                      </select>
                     </div>
                     <div>
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium"
                         style={tenant.approved ? { background: "#E1F5EE", color: "#085041" } : { background: "#FAEEDA", color: "#633806" }}>
                         {tenant.approved ? "Approved" : "Pending"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-                        style={tenant.access_enabled ? { background: "#E6F1FB", color: "#0C447C" } : { background: "#F1EFE8", color: "#5F5E5A" }}>
-                        {tenant.access_enabled ? "Enabled" : "Disabled"}
                       </span>
                     </div>
                   </div>
@@ -699,7 +753,6 @@ export default function AdminBuildingPage() {
         </>
       )}
 
-      {/* ── FLAT HISTORY TAB ── */}
       {tab === "history" && (
         <div className="rounded-xl overflow-hidden" style={{ border: "1.5px solid rgba(27,79,187,0.18)" }}>
           <div className="flex items-center gap-2 px-4 py-3" style={{ background: "#F5F7FB", borderBottom: "1px solid rgba(27,79,187,0.12)" }}>
@@ -726,7 +779,6 @@ export default function AdminBuildingPage() {
         </div>
       )}
 
-      {/* ── EDIT INFO TAB — now saves to Supabase ── */}
       {tab === "edit" && (
         <div className="rounded-xl p-5" style={{ background: "#fff", border: "2px solid #1B4FBB" }}>
           <div className="flex items-center justify-between mb-4">
@@ -773,10 +825,10 @@ export default function AdminBuildingPage() {
                 style={{ border: "1.5px solid rgba(27,79,187,0.25)", color: "#111827", background: editing ? "#fff" : "#F5F7FB" }} />
             </div>
             <div>
-              <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Monthly collection</label>
-              <input type="number" value={monthlyCollection} disabled={!editing} onChange={(e) => setMonthlyCollection(e.target.value)}
+              <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Monthly collection (auto, from tenant rents)</label>
+              <input value={`₹${liveMonthlyRent.toLocaleString("en-IN")}`} disabled
                 className="w-full px-3 py-2 text-sm rounded-lg"
-                style={{ border: "1.5px solid rgba(27,79,187,0.25)", color: "#111827", background: editing ? "#fff" : "#F5F7FB" }} />
+                style={{ border: "1.5px solid rgba(27,79,187,0.15)", color: "#9CA3AF", background: "#F5F7FB" }} />
             </div>
           </div>
 
@@ -784,13 +836,12 @@ export default function AdminBuildingPage() {
           {saveError && <p className="text-xs mt-3" style={{ color: "#A32D2D" }}>Couldn't save: {saveError}</p>}
           {!editing && !saved && (
             <p className="text-xs mt-3" style={{ color: "#9CA3AF" }}>
-              Click Edit to update the building's address or flat count. Changes save to the database.
+              Click Edit to update the building's address or flat count. Monthly collection always reflects the sum of tenant rents.
             </p>
           )}
         </div>
       )}
 
-      {/* ── NOTES TAB — now a real list of dated notes per building ── */}
       {tab === "notes" && (
         <div>
           <div className="flex items-center gap-2 mb-3">
@@ -798,7 +849,6 @@ export default function AdminBuildingPage() {
             <span className="text-sm font-semibold" style={{ color: "#111827" }}>Notes — {property.name}</span>
           </div>
 
-          {/* Add a new note */}
           <div className="rounded-xl p-4 mb-4" style={{ border: "1.5px solid rgba(27,79,187,0.18)", background: "#F5F7FB" }}>
             <textarea
               value={newNoteText}
@@ -819,7 +869,6 @@ export default function AdminBuildingPage() {
 
           {notesError && <p className="text-xs mb-3" style={{ color: "#A32D2D" }}>{notesError}</p>}
 
-          {/* List of existing notes, newest first */}
           {notesList.length === 0 ? (
             <div className="rounded-xl p-8 text-center" style={{ border: "1px solid rgba(27,79,187,0.12)", color: "#9CA3AF" }}>
               <StickyNote size={20} className="mx-auto mb-2 opacity-30" />
@@ -887,7 +936,6 @@ export default function AdminBuildingPage() {
         </div>
       )}
 
-      {/* ── EXPENDITURE TAB — still local for now, migrates in a later stage ── */}
       {tab === "expenditure" && (
         <div>
           <div className="flex items-center justify-between px-4 py-3 rounded-xl mb-5"
@@ -1006,7 +1054,6 @@ export default function AdminBuildingPage() {
         </div>
       )}
 
-      {/* ── ADD TENANT MODAL — pre-filled with this building ── */}
       {showAddTenantModal && property && (
         <div className="fixed inset-0 flex items-center justify-center z-50 p-4 overflow-y-auto" style={{ background: "rgba(17,24,39,0.5)" }}>
           <div className="rounded-xl p-6 w-full max-w-lg my-8" style={{ background: "#fff" }}>
@@ -1078,6 +1125,37 @@ export default function AdminBuildingPage() {
                     style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Security deposit (₹)</label>
+                  <input type="number" value={newTenant.securityDeposit} onChange={(e) => setNewTenant({ ...newTenant, securityDeposit: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Amount given (₹)</label>
+                  <input type="number" value={newTenant.amountGiven} onChange={(e) => setNewTenant({ ...newTenant, amountGiven: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Date of joining</label>
+                  <input type="date" value={newTenant.joiningDate} onChange={(e) => setNewTenant({ ...newTenant, joiningDate: e.target.value })}
+                    className="w-full px-3 py-2 text-sm rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium mb-1 block" style={{ color: "#6B7280" }}>Aadhar document (upload)</label>
+                  <input type="file" onChange={(e) => setNewAadharFile(e.target.files?.[0] ?? null)}
+                    className="w-full text-xs px-3 py-2 rounded-lg"
+                    style={{ border: "1px solid #E5E7EB", color: "#6B7280" }} />
+                  {newAadharFile && <p className="text-xs mt-1" style={{ color: "#0F6E56" }}>{newAadharFile.name}</p>}
+                </div>
+              </div>
             </div>
 
             <div className="flex items-center justify-between mb-2">
@@ -1088,6 +1166,7 @@ export default function AdminBuildingPage() {
             {newCoTenants.map((co) => (
               <CoTenantCardProp key={co.id} co={co}
                 onUpdate={(f, v) => updateNewCoTenant(co.id, f, v)}
+                onUpdateFile={(file) => updateNewCoTenantFile(co.id, file)}
                 onRemove={() => removeNewCoTenant(co.id)} />
             ))}
             <button onClick={addNewCoTenant}

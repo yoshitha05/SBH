@@ -2,15 +2,11 @@
 
 // app/admin/tenants/page.tsx
 //
-// STAGE 2 of Supabase migration for Tenants: co-tenants are now fully
-// wired in — the Active tenants table shows real occupant counts, and
-// both the Add and Edit modals read/write the real co_tenants table.
-//
-// STILL DEFERRED:
-//   - paymentStatus / googleFormStatus: not yet columns in Supabase,
-//     approximated from `status`/`approved` for display purposes only.
+// CoTenantCard is memo()'d to fix the cursor-jump bug, and each co-tenant
+// card now ALSO has its own Aadhar file upload field, matching the
+// building detail page's Add Tenant modal.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabaseClient";
 import jsPDF from "jspdf";
@@ -34,12 +30,13 @@ const payStyle: Record<string, { bg: string; text: string }> = {
 type CoTenant = {
   id: number | string;
   name: string; age: string; phone: string; email: string; aadhar: string;
+  aadharFile?: File | null;
   isNew?: boolean;
 };
 
 let _newCoId = 1;
 function blankCoTenant(): CoTenant {
-  return { id: `new${_newCoId++}`, name: "", age: "", phone: "", email: "", aadhar: "", isNew: true };
+  return { id: `new${_newCoId++}`, name: "", age: "", phone: "", email: "", aadhar: "", aadharFile: null, isNew: true };
 }
 
 type SupabaseTenant = {
@@ -78,6 +75,55 @@ function maskAadhar(aadhar?: string | null) {
   if (digits.length < 4) return "••••";
   return `•••• •••• ${digits.slice(-4)}`;
 }
+
+const CoTenantCard = memo(function CoTenantCard({ co, onUpdate, onUpdateFile, onRemove }: {
+  co: CoTenant;
+  onUpdate: (f: keyof Omit<CoTenant, "id" | "isNew" | "aadharFile">, v: string) => void;
+  onUpdateFile: (file: File | null) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-lg p-3 mb-2" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB" }}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium" style={{ color: "#6B7280" }}>Additional tenant</span>
+        <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF" }}>
+          <X size={14} />
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        <div className="col-span-2">
+          <input value={co.name} onChange={(e) => onUpdate("name", e.target.value)}
+            placeholder="Full name" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        </div>
+        <div>
+          <input type="number" value={co.age} onChange={(e) => onUpdate("age", e.target.value)}
+            placeholder="Age" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 mb-2">
+        <input value={co.phone} onChange={(e) => onUpdate("phone", e.target.value)}
+          placeholder="Phone" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        <input value={co.email} onChange={(e) => onUpdate("email", e.target.value)}
+          placeholder="Email" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
+          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <input value={co.aadhar} onChange={(e) => onUpdate("aadhar", e.target.value)}
+          placeholder="Aadhar number" className="w-full px-2.5 py-1.5 text-xs rounded-lg font-mono"
+          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
+        <div>
+          <input type="file" onChange={(e) => onUpdateFile(e.target.files?.[0] ?? null)}
+            className="w-full text-xs px-2.5 py-1.5 rounded-lg"
+            style={{ border: "1px solid #E5E7EB", color: "#6B7280" }} />
+          {co.aadharFile && <p className="text-xs mt-1 truncate" style={{ color: "#0F6E56" }}>{co.aadharFile.name}</p>}
+        </div>
+      </div>
+    </div>
+  );
+});
 
 export default function AdminTenantsPage() {
   const [tenants, setTenants] = useState<SupabaseTenant[]>([]);
@@ -223,12 +269,15 @@ export default function AdminTenantsPage() {
   function addNewCoTenant() {
     setNewCoTenants((prev) => [...prev, blankCoTenant()]);
   }
-  function updateNewCoTenant(id: number | string, field: keyof Omit<CoTenant, "id" | "isNew">, val: string) {
+  const updateNewCoTenant = useCallback((id: number | string, field: keyof Omit<CoTenant, "id" | "isNew" | "aadharFile">, val: string) => {
     setNewCoTenants((prev) => prev.map((c) => c.id === id ? { ...c, [field]: val } : c));
-  }
-  function removeNewCoTenant(id: number | string) {
+  }, []);
+  const updateNewCoTenantFile = useCallback((id: number | string, file: File | null) => {
+    setNewCoTenants((prev) => prev.map((c) => c.id === id ? { ...c, aadharFile: file } : c));
+  }, []);
+  const removeNewCoTenant = useCallback((id: number | string) => {
     setNewCoTenants((prev) => prev.filter((c) => c.id !== id));
-  }
+  }, []);
   async function submitNewTenant() {
     if (!newTenant.name.trim() || !newTenant.flatNo.trim()) {
       setAddError("Please enter at least a name and flat number.");
@@ -236,11 +285,14 @@ export default function AdminTenantsPage() {
     }
     setAddError("");
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setAddError("Not signed in."); return; }
+
     const { data: inserted, error } = await supabase
       .from("tenants")
       .insert({
         name: newTenant.name.trim(),
-        owner_id: (await supabase.auth.getUser()).data.user?.id,
+        owner_id: user.id,
         building: newTenant.building,
         flat_no: newTenant.flatNo.trim(),
         rent: Number(newTenant.rent) || 0,
@@ -275,7 +327,7 @@ export default function AdminTenantsPage() {
 
     const validCoTenants = newCoTenants.filter((c) => c.name.trim());
     if (validCoTenants.length > 0 && inserted) {
-      const { error: coError } = await supabase.from("co_tenants").insert(
+      const { data: insertedCoTenants, error: coError } = await supabase.from("co_tenants").insert(
         validCoTenants.map((c) => ({
           tenant_id: inserted.id,
           owner_id: inserted.owner_id,
@@ -285,11 +337,25 @@ export default function AdminTenantsPage() {
           email: c.email,
           aadhar: c.aadhar.trim() || null,
         }))
-      );
+      ).select();
+
       if (coError) {
         setAddError(`Tenant added, but co-tenants failed to save: ${coError.message}`);
         await loadTenants();
         return;
+      } else if (insertedCoTenants) {
+        for (let i = 0; i < validCoTenants.length; i++) {
+          const file = validCoTenants[i].aadharFile;
+          const coRow = insertedCoTenants[i];
+          if (file && coRow) {
+            const fileExt = file.name.split(".").pop();
+            const filePath = "co-tenant-" + coRow.id + "/aadhar-" + Date.now() + "." + fileExt;
+            const { error: coUploadError } = await supabase.storage.from("documents").upload(filePath, file);
+            if (!coUploadError) {
+              await supabase.from("co_tenants").update({ aadhar_file_path: filePath }).eq("id", coRow.id);
+            }
+          }
+        }
       }
     }
 
@@ -316,12 +382,15 @@ export default function AdminTenantsPage() {
   function addEditCoTenant() {
     setEditCoTenants((prev) => [...prev, blankCoTenant()]);
   }
-  function updateEditCoTenant(id: number | string, field: keyof Omit<CoTenant, "id" | "isNew">, val: string) {
+  const updateEditCoTenant = useCallback((id: number | string, field: keyof Omit<CoTenant, "id" | "isNew" | "aadharFile">, val: string) => {
     setEditCoTenants((prev) => prev.map((c) => c.id === id ? { ...c, [field]: val } : c));
-  }
-  function removeEditCoTenant(id: number | string) {
+  }, []);
+  const updateEditCoTenantFile = useCallback((id: number | string, file: File | null) => {
+    setEditCoTenants((prev) => prev.map((c) => c.id === id ? { ...c, aadharFile: file } : c));
+  }, []);
+  const removeEditCoTenant = useCallback((id: number | string) => {
     setEditCoTenants((prev) => prev.filter((c) => c.id !== id));
-  }
+  }, []);
   async function submitEdit() {
     if (!editingTenant) return;
     setEditError("");
@@ -365,56 +434,32 @@ export default function AdminTenantsPage() {
         aadhar: co.aadhar.trim() || null,
       };
       if (co.isNew) {
-        const { error: insErr } = await supabase.from("co_tenants").insert(payload);
+        const { data: insertedCo, error: insErr } = await supabase.from("co_tenants").insert(payload).select().single();
         if (insErr) { setEditError(`Couldn't save co-tenants: ${insErr.message}`); return; }
+        if (co.aadharFile && insertedCo) {
+          const fileExt = co.aadharFile.name.split(".").pop();
+          const filePath = "co-tenant-" + insertedCo.id + "/aadhar-" + Date.now() + "." + fileExt;
+          const { error: coUploadError } = await supabase.storage.from("documents").upload(filePath, co.aadharFile);
+          if (!coUploadError) {
+            await supabase.from("co_tenants").update({ aadhar_file_path: filePath }).eq("id", insertedCo.id);
+          }
+        }
       } else {
         const { error: updErr } = await supabase.from("co_tenants").update(payload).eq("id", co.id);
         if (updErr) { setEditError(`Couldn't save co-tenants: ${updErr.message}`); return; }
+        if (co.aadharFile) {
+          const fileExt = co.aadharFile.name.split(".").pop();
+          const filePath = "co-tenant-" + co.id + "/aadhar-" + Date.now() + "." + fileExt;
+          const { error: coUploadError } = await supabase.storage.from("documents").upload(filePath, co.aadharFile);
+          if (!coUploadError) {
+            await supabase.from("co_tenants").update({ aadhar_file_path: filePath }).eq("id", co.id);
+          }
+        }
       }
     }
 
     setEditingTenant(null);
     await loadTenants();
-  }
-
-  function CoTenantCard({ co, onUpdate, onRemove }: {
-    co: CoTenant;
-    onUpdate: (f: keyof Omit<CoTenant, "id" | "isNew">, v: string) => void;
-    onRemove: () => void;
-  }) {
-    return (
-      <div className="rounded-lg p-3 mb-2" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB" }}>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium" style={{ color: "#6B7280" }}>Additional tenant</span>
-          <button onClick={onRemove} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF" }}>
-            <X size={14} />
-          </button>
-        </div>
-        <div className="grid grid-cols-3 gap-2 mb-2">
-          <div className="col-span-2">
-            <input value={co.name} onChange={(e) => onUpdate("name", e.target.value)}
-              placeholder="Full name" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-              style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-          </div>
-          <div>
-            <input type="number" value={co.age} onChange={(e) => onUpdate("age", e.target.value)}
-              placeholder="Age" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-              style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 mb-2">
-          <input value={co.phone} onChange={(e) => onUpdate("phone", e.target.value)}
-            placeholder="Phone" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-          <input value={co.email} onChange={(e) => onUpdate("email", e.target.value)}
-            placeholder="Email" className="w-full px-2.5 py-1.5 text-xs rounded-lg"
-            style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-        </div>
-        <input value={co.aadhar} onChange={(e) => onUpdate("aadhar", e.target.value)}
-          placeholder="Aadhar number" className="w-full px-2.5 py-1.5 text-xs rounded-lg font-mono"
-          style={{ border: "1px solid #E5E7EB", color: "#111827", outline: "none" }} />
-      </div>
-    );
   }
 
   if (loading) {
@@ -739,6 +784,7 @@ export default function AdminTenantsPage() {
             {newCoTenants.map((co) => (
               <CoTenantCard key={co.id} co={co}
                 onUpdate={(f, v) => updateNewCoTenant(co.id, f, v)}
+                onUpdateFile={(file) => updateNewCoTenantFile(co.id, file)}
                 onRemove={() => removeNewCoTenant(co.id)} />
             ))}
             <button onClick={addNewCoTenant}
@@ -858,6 +904,7 @@ export default function AdminTenantsPage() {
             {editCoTenants.map((co) => (
               <CoTenantCard key={co.id} co={co}
                 onUpdate={(f, v) => updateEditCoTenant(co.id, f, v)}
+                onUpdateFile={(file) => updateEditCoTenantFile(co.id, file)}
                 onRemove={() => removeEditCoTenant(co.id)} />
             ))}
             <button onClick={addEditCoTenant}

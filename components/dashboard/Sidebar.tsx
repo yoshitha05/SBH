@@ -2,8 +2,7 @@
 
 // components/dashboard/Sidebar.tsx
 //
-// Admin-only nav. Added "Access requests" so the admin can find the new
-// invite-code review page.
+// Added "Connect Google Form" nav item.
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -11,7 +10,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import {
   LayoutDashboard, Building2, Users, Bell,
-  Wallet, ShieldCheck, FileSpreadsheet, UserPlus,
+  Wallet, ShieldCheck, FileSpreadsheet, UserPlus, ClipboardList,
   Home, LogOut, X, Mail,
 } from "lucide-react";
 
@@ -35,8 +34,9 @@ const adminMenu: NavGroup[] = [
     { label: "Approvals",   icon: ShieldCheck,     href: "/admin/approvals" },
   ]},
   { group: "Actions", items: [
-    { label: "Reminders",      icon: Bell,     href: "/admin/reminders" },
-    { label: "Access requests", icon: UserPlus, href: "/admin/access-requests" },
+    { label: "Reminders",       icon: Bell,          href: "/admin/reminders" },
+    { label: "Access requests", icon: UserPlus,      href: "/admin/access-requests" },
+    { label: "Connect Google Form", icon: ClipboardList, href: "/admin/google-form" },
   ]},
 ];
 
